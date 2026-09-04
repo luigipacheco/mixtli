@@ -46,6 +46,11 @@ sense for your object.
 Output is a real `PointCloud` datablock with `position` / `radius` / `Col`, so
 you can stack geometry nodes on it afterwards.
 
+![Regular grid with an attractor](docs/attractors.jpg)
+
+*Cell Centre grid, post-processed in geometry nodes: distance to the sphere
+drives a Map Range into a colour mix.*
+
 ## Notes
 
 Colour comes from reading texture pixels through the UVs - no bake, no UV
