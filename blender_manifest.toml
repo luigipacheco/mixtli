@@ -1,0 +1,33 @@
+schema_version = "1.0.0"
+
+id = "mixtli"
+name = "Mixtli"
+tagline = "(point) Cloud maker for Blender"
+version = "1.0.0"
+type = "add-on"
+
+maintainer = "Luis Pacheco <luigipach@gmail.com>"
+website = "https://github.com/luigipacheco/mixtli"
+
+tags = ["Geometry Nodes", "Mesh", "Object"]
+
+blender_version_min = "4.2.0"
+
+license = [
+  "SPDX:GPL-3.0-or-later",
+]
+copyright = [
+  "2026 Luis Pacheco",
+]
+
+# Pure Python + Blender's bundled numpy. No network, no bundled wheels,
+# no filesystem access beyond the PLY path the user explicitly chooses.
+[permissions]
+files = "Export point clouds to a PLY file chosen by the user"
+
+[build]
+paths_exclude_pattern = [
+  "__pycache__/",
+  "/.git/",
+  "/*.zip",
+]
