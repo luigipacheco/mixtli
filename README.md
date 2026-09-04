@@ -6,6 +6,8 @@ Turns a textured mesh into a coloured point cloud. Handles objects with
 hundreds of material slots - photogrammetry scans, Google 3D Tiles imports -
 by flattening every slot into a single colour attribute first.
 
+![Mixtli](docs/screenshot.jpg)
+
 ## Install
 
 Download the `.zip` from [Releases](https://github.com/luigipacheco/mixtli/releases),
