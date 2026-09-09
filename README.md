@@ -1,10 +1,18 @@
 # Mixtli
 
-**(point) Cloud maker for Blender.** *Mixtli* is Nahuatl for cloud.
+**Generate, analyse and visualise point clouds.** *Mixtli* is Nahuatl for cloud.
 
-Turns a textured mesh into a coloured point cloud. Handles objects with
-hundreds of material slots - photogrammetry scans, Google 3D Tiles imports -
-by flattening every slot into a single colour attribute first.
+Mixtli brings point clouds into Blender, gives you tools to interrogate them,
+and renders the answer.
+
+- **Generate** - from a textured mesh, however many material slots it carries,
+  or from a cloud you already have.
+- **Analyse** - select by distance, section, volume, height, or by an attribute
+  the cloud came with.
+- **Visualise** - results come out as colour, ready to light and render.
+
+Point-cloud analysis tools exist elsewhere. What Blender adds is that the
+answer is already an image.
 
 ![Mixtli](docs/screenshot.jpg)
 
@@ -76,11 +84,16 @@ across objects of any scale.
 *Cell Centre grid, post-processed in geometry nodes: distance to the sphere
 drives a Map Range into a colour mix.*
 
-## Node group assets
+## Analyse
 
-Mixtli ships a library of geometry-node groups built for point clouds, and
-registers it as an asset library on install. Open the Asset Browser and look
-under **Mixtli**, or drag a group straight into a geometry-nodes tree.
+Mixtli ships a library of geometry-node groups for asking questions of a point
+cloud, and registers it as an asset library on install. Open the Asset Browser
+and look under **Mixtli**, or drag a group straight into a geometry-nodes tree.
+
+Ask spatially - distance to a point, a set of points, a curve corridor or a
+surface; inside a closed volume or the band near its boundary; plane and
+multi-plane sections; height bands. Or ask by attribute: select a numeric range
+on any named attribute the cloud carries.
 
 | Catalog | Groups |
 |---|---|
@@ -109,6 +122,55 @@ red is high or near; gold marks the object you move.*
 ![Sections and falloff examples](docs/assets-sections.jpg)
 
 *Plane sections, volume boundary bands, and an editable falloff curve.*
+
+### By source attribute
+
+Point clouds arrive carrying data - colour, intensity, classification codes,
+return numbers, normals. These groups read what is already there and turn it
+into a selection.
+
+| Group | Selects by |
+|---|---|
+| MX 17 \| Read source color | reads a colour attribute; RGB, HSV, luminance and alpha out |
+| MX 18 \| Match source color | nearness to a picked swatch, optionally ignoring brightness |
+| MX 19 \| HSV color range | hue, saturation and brightness bounds |
+| MX 20 \| RGB vegetation candidates | green dominance, `ExG = 2g - r - b` |
+| MX 21 \| Class ID selection | an integer class, or a range of them |
+| MX 22 \| Vector attribute filter | a vector's length, or its alignment to a direction |
+| MX 24 \| Boolean attribute rule | a boolean attribute being true or false |
+| MX 25 \| Attribute relationships | difference, ratio or normalised difference of two attributes |
+| MX 27 \| Scalar field rule | an inclusive numeric range on any scalar field |
+| MX 26 \| Tag and extract feature | writes a feature ID and score, and splits matched from remaining |
+
+Colour work happens in **display sRGB** by default, because that is the space
+colour thresholds are normally quoted in. Mixtli stores `Col` as linear and
+these groups convert on the way in; turn off **Use Display RGB** to stay
+linear. The one exception is `MX 17`'s **Luminance**, which is always linear,
+because that is what luminance means.
+
+Worked examples: vegetation from ordinary photogrammetry colour is `MX 20`
+into `MX 26`, tagged and split out. Classified LiDAR is `MX 21` with the ASPRS
+code you want - 2 ground, 3-5 vegetation, 6 building, 9 water. With a
+near-infrared and a red band, `MX 25`'s Normalized Difference is NDVI.
+
+## Visualise
+
+**MX 10 | Heatmap point display** turns any analysis result into colour.
+
+- **Heatmap Low / Mid Low / Mid High / High** - four stops across the
+  normalised value.
+- **Use Selection Colors** - flat selected/unselected colours instead of the
+  heatmap, for reading a selection at a glance.
+- **Size By Value** with **Radius Gain** - magnitude reads as size as well as
+  hue.
+- **Isolate Selection** - delete unselected points rather than dimming them.
+  **Unselected Brightness** sets the dimming when it is off.
+- **Original Color Mix** - blend the source colour back over the analysis, so
+  the photographic texture stays underneath.
+
+It also writes `mx_value`, `mx_weight`, `mx_selected`, `mx_valid` and
+`mx_viz_color` as point attributes, so later nodes - or a script - can read
+what it decided.
 
 ## Notes
 

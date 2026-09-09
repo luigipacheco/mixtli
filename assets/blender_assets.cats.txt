@@ -10,3 +10,4 @@ VERSION 1
 ad86a652-2a3d-5547-ac13-6702b0c36b34:Mixtli/Display:Mixtli-Display
 2c85703b-77d3-552e-9bd2-af0224e44ece:Mixtli/Utilities:Mixtli-Utilities
 7d587310-a2dc-5e4e-b362-5fa813d6edad:Mixtli/Starters:Mixtli-Starters
+06232e0d-4930-59b6-9330-edc8c919063d:Mixtli/Attributes and Colour:Mixtli-Attributes and Colour
