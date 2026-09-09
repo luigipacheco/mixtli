@@ -52,6 +52,12 @@ sense for your object.
 Output is a real `PointCloud` datablock with `position` / `radius` / `Col`, so
 you can stack geometry nodes on it afterwards.
 
+**Add Display Node Group** (Advanced, on by default) attaches a small shared
+modifier with a **Radius Scale** slider, so point size stays adjustable
+afterwards without re-running anything. It multiplies the stored per-point
+radius rather than setting an absolute one, so a single group stays correct
+across objects of any scale.
+
 ![Regular grid with an attractor](docs/attractors.jpg)
 
 *Cell Centre grid, post-processed in geometry nodes: distance to the sphere
@@ -75,6 +81,15 @@ so they compose: feed any of them into **MX 10 | Heatmap point display** to
 colour by the result, or into **MX 09 | Combine selections** to intersect two
 of them. **MX 12 | Points adapter** takes a mesh or a point cloud and hands
 back points, so the groups work on either.
+
+![Point cloud analysis examples](docs/assets-analysis.jpg)
+
+*Nine of the analysis groups on synthetic survey points. Blue is low or far,
+red is high or near; gold marks the object you move.*
+
+![Sections and falloff examples](docs/assets-sections.jpg)
+
+*Plane sections, volume boundary bands, and an editable falloff curve.*
 
 ## Notes
 
