@@ -1,3 +1,5 @@
+<img src="docs/logo.svg" width="96" alt="">
+
 # Mixtli
 
 **Generate, analyse and visualise point clouds.** *Mixtli* is Nahuatl for cloud.
