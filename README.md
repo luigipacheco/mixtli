@@ -153,6 +153,12 @@ into `MX 26`, tagged and split out. Classified LiDAR is `MX 21` with the ASPRS
 code you want - 2 ground, 3-5 vegetation, 6 building, 9 water. With a
 near-infrared and a red band, `MX 25`'s Normalized Difference is NDVI.
 
+![Attribute and colour examples](docs/assets-attributes.jpg)
+
+*Reading attributes, then narrowing: source data, a picked swatch, an HSV
+range, a scalar range, two attributes combined, and a feature recipe that
+stacks class, quality flag, surface direction and a channel ratio.*
+
 ## Visualise
 
 **MX 10 | Heatmap point display** turns any analysis result into colour.
