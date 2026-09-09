@@ -340,35 +340,58 @@ def pick_bake_type(obj, cfg):
     return 'EMIT' if total and emissive / total > 0.5 else 'DIFFUSE'
 
 
+def cycles_available():
+    """Cycles ships with Blender but can be switched off, and EEVEE has no bake
+    operator of its own. Everything else in Mixtli is engine-agnostic; only
+    this fallback needs Cycles."""
+    if "cycles" in bpy.context.preferences.addons:
+        return True
+    try:
+        return 'CYCLES' in {i.identifier for i in
+                            bpy.types.RenderSettings.bl_rna.properties['engine'].enum_items}
+    except Exception:
+        return False
+
+
 def bake_cycles(obj, cfg, report):
+    if not cycles_available():
+        report.append("  Cycles is disabled, so the bake fallback is unavailable. "
+                      "Enable it in Preferences > Add-ons, or simplify the "
+                      "material so its texture can be sampled directly")
+        return False
+
     scene = bpy.context.scene
     prev_engine = scene.render.engine
     prev_target = scene.render.bake.target
     ensure_color_attribute(obj.data, cfg.attr_name)
-
     btype = pick_bake_type(obj, cfg)
-    scene.render.engine = 'CYCLES'
-    scene.cycles.samples = cfg.cycles_samples
-    scene.render.bake.target = 'VERTEX_COLORS'
-    if btype == 'DIFFUSE':
-        scene.render.bake.use_pass_direct = False
-        scene.render.bake.use_pass_indirect = False
-        scene.render.bake.use_pass_color = True
-
-    for o in bpy.context.view_layer.objects:
-        o.select_set(False)
-    obj.select_set(True)
-    bpy.context.view_layer.objects.active = obj
+    ok = False
     try:
+        # assigning the engine raises if Cycles is not registered, so it belongs
+        # inside the guard rather than ahead of it
+        scene.render.engine = 'CYCLES'
+        scene.cycles.samples = cfg.cycles_samples
+        scene.render.bake.target = 'VERTEX_COLORS'
+        if btype == 'DIFFUSE':
+            scene.render.bake.use_pass_direct = False
+            scene.render.bake.use_pass_indirect = False
+            scene.render.bake.use_pass_color = True
+
+        for o in bpy.context.view_layer.objects:
+            o.select_set(False)
+        obj.select_set(True)
+        bpy.context.view_layer.objects.active = obj
         bpy.ops.object.bake(type=btype)
         report.append("  cycles bake (%s, %d samples)" % (btype, cfg.cycles_samples))
         ok = True
     except Exception as e:
         report.append("  cycles bake failed: %s" % e)
-        ok = False
     finally:
-        scene.render.engine = prev_engine
-        scene.render.bake.target = prev_target
+        try:
+            scene.render.engine = prev_engine
+            scene.render.bake.target = prev_target
+        except Exception:
+            pass
     return ok
 
 

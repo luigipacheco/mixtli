@@ -13,7 +13,20 @@ by flattening every slot into a single colour attribute first.
 Download the `.zip` from [Releases](https://github.com/luigipacheco/mixtli/releases),
 then **Edit > Preferences > Get Extensions > Install from Disk**.
 
-Blender 4.2 or newer.
+Blender 4.2 or newer. Works in EEVEE and Cycles.
+
+## Quick start
+
+1. Select a textured mesh - or an imported point cloud, either works.
+2. Press `N` in the 3D view and open the **Mixtli** tab.
+3. Click **Mesh to Colour Point Cloud**.
+4. Leave the defaults and confirm.
+
+You get a new `<name>_pointcloud` object. The original is never modified.
+
+For a voxel grid: set **Points From** to *Regular Grid*, give **Voxel Size** a
+value in metres, then raise **Scatter Points** until the dialog reads 25-50
+points per cell. Set **Cell Position** to *Cell Centre* for a true lattice.
 
 ## Use
 
@@ -82,6 +95,12 @@ colour by the result, or into **MX 09 | Combine selections** to intersect two
 of them. **MX 12 | Points adapter** takes a mesh or a point cloud and hands
 back points, so the groups work on either.
 
+**MX 11 | Point statistics is optional.** Nothing depends on it - no other
+group calls it, and a selection works fine without it. It exists to read
+numbers off a result: total and selected counts, selected fraction, and the
+min, max and mean of the analysis value. Add it when you want the figures,
+leave it out otherwise.
+
 ![Point cloud analysis examples](docs/assets-analysis.jpg)
 
 *Nine of the analysis groups on synthetic survey points. Blue is low or far,
@@ -97,6 +116,11 @@ Colour comes from reading texture pixels through the UVs - no bake, no UV
 unwrap, seconds not minutes. Shaders too complex to resolve fall back to a
 Cycles bake automatically. sRGB is decoded to linear so colours do not come
 out gamma-shifted.
+
+Both engines render Mixtli output the same way: the point material is an
+emission shader reading a colour attribute, which EEVEE and Cycles agree on.
+Cycles is needed only for the bake fallback, because EEVEE has no bake
+operator - and if Cycles is disabled, Mixtli tells you rather than failing.
 
 Only needs numpy, which Blender already ships.
 
