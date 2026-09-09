@@ -20,6 +20,12 @@ Blender 4.2 or newer.
 Select a mesh, open the **Mixtli** tab in the 3D view sidebar (`N`), hit the
 button. Set the options in the dialog and confirm.
 
+Already have a point cloud? Select that instead. Mixtli detects a `PointCloud`
+object or a face-less mesh (how `.ply` clouds import), skips straight past the
+material flattening, and offers just the grid and radius options - so you can
+voxel-grid an imported scan, or simply give it a material and a live radius
+slider.
+
 **Points From** picks how the cloud is built:
 
 | Mode | Output | Good for |

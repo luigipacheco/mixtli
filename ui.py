@@ -8,7 +8,7 @@ from bpy.props import (BoolProperty, EnumProperty, FloatProperty,
                        IntProperty, StringProperty)
 
 from .build import process
-from .colour import surface_area
+from .colour import input_kind, surface_area
 
 BIG_POINT_WARNING = 25_000_000
 
@@ -84,6 +84,10 @@ class MIXTLI_OT_pointcloud(bpy.types.Operator):
     export_ply: BoolProperty(name="Export PLY", default=False)
     ply_path: StringProperty(name="PLY Path", default="//pointcloud.ply",
                              subtype='FILE_PATH')
+    display_group: BoolProperty(
+        name="Add Display Node Group", default=True,
+        description="Add a shared geometry-nodes modifier with a Radius Scale "
+                    "slider, so point size stays adjustable after the fact")
 
     # --- shared
     radius_mode: EnumProperty(
@@ -130,10 +134,11 @@ class MIXTLI_OT_pointcloud(bpy.types.Operator):
     stat_area: FloatProperty(options={'HIDDEN', 'SKIP_SAVE'})
     stat_objects: IntProperty(options={'HIDDEN', 'SKIP_SAVE'})
     stat_verts: IntProperty(options={'HIDDEN', 'SKIP_SAVE'})
+    stat_is_points: BoolProperty(options={'HIDDEN', 'SKIP_SAVE'})
 
     @classmethod
     def poll(cls, context):
-        return any(o.type == 'MESH' for o in context.selected_objects)
+        return any(input_kind(o) for o in context.selected_objects)
 
     def estimate(self):
         """(points, spacing, radius) for the current settings."""
@@ -166,6 +171,45 @@ class MIXTLI_OT_pointcloud(bpy.types.Operator):
         layout = self.layout
         layout.use_property_split = True
         layout.use_property_decorate = False
+
+        if self.stat_is_points:
+            # input is already a cloud: nothing to bake or scatter
+            layout.prop(self, "voxel_size")
+            if self.voxel_size > 0.0:
+                layout.prop(self, "grid_mode")
+                layout.prop(self, "world_anchored")
+                layout.prop(self, "min_cell_points")
+            layout.prop(self, "radius_mode")
+            layout.prop(self, "point_radius" if self.radius_mode == 'MANUAL'
+                        else "radius_factor")
+            layout.prop(self, "display_group")
+
+            box = layout.box()
+            col = box.column(align=True)
+            col.scale_y = 0.85
+            col.label(text="%d cloud(s)  -  %s points in"
+                           % (self.stat_objects, fmt_count(self.stat_verts)),
+                      icon='OUTLINER_OB_POINTCLOUD')
+            if self.voxel_size > 0.0:
+                col.label(text="Gridding at %.4g m - cell count reported on run"
+                               % self.voxel_size)
+            else:
+                col.label(text="Voxel Size 0 - keeping every point as-is")
+
+            layout.separator()
+            layout.prop(self, "show_advanced", toggle=True,
+                        icon='TRIA_DOWN' if self.show_advanced else 'TRIA_RIGHT')
+            if self.show_advanced:
+                box = layout.box()
+                box.use_property_split = True
+                box.prop(self, "attr_name")
+                box.prop(self, "emission_strength")
+                box.prop(self, "suffix")
+                box.separator()
+                box.prop(self, "export_ply")
+                if self.export_ply:
+                    box.prop(self, "ply_path")
+            return
 
         layout.prop(self, "point_source")
         if self.point_source == 'DISTRIBUTE':
@@ -231,15 +275,24 @@ class MIXTLI_OT_pointcloud(bpy.types.Operator):
                 box.prop(self, "cycles_samples")
 
     def invoke(self, context, event):
-        targets = [o for o in context.selected_objects if o.type == 'MESH']
+        targets = [o for o in context.selected_objects if input_kind(o)]
+        pts = [o for o in targets if input_kind(o) == 'POINTS']
+        self.stat_is_points = bool(pts) and len(pts) == len(targets)
         self.stat_objects = len(targets)
-        self.stat_verts = sum(len(o.data.vertices) for o in targets)
-        self.stat_area = sum(surface_area(o) for o in targets)
+        if self.stat_is_points:
+            self.stat_verts = sum(
+                len(o.data.points) if o.type == 'POINTCLOUD' else len(o.data.vertices)
+                for o in targets)
+            self.stat_area = 0.0
+        else:
+            mesh = [o for o in targets if input_kind(o) == 'MESH']
+            self.stat_verts = sum(len(o.data.vertices) for o in mesh)
+            self.stat_area = sum(surface_area(o) for o in mesh)
         return context.window_manager.invoke_props_dialog(self, width=380)
 
     def execute(self, context):
         t0 = time.time()
-        targets = [o for o in context.selected_objects if o.type == 'MESH']
+        targets = [o for o in context.selected_objects if input_kind(o)]
         if not targets:
             self.report({'ERROR'}, "Select at least one mesh object")
             return {'CANCELLED'}

@@ -3,7 +3,7 @@ schema_version = "1.0.0"
 id = "mixtli"
 name = "Mixtli"
 tagline = "(point) Cloud maker for Blender"
-version = "1.0.0"
+version = "1.1.0"
 type = "add-on"
 
 maintainer = "Luis Pacheco <luigipach@gmail.com>"

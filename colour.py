@@ -153,6 +153,82 @@ def corner_material_index(me):
     return np.repeat(pm, lt)
 
 
+POINT_COLOR_TYPES = {'FLOAT_COLOR', 'BYTE_COLOR'}
+
+
+def input_kind(obj):
+    """'MESH' if there are faces to sample, 'POINTS' for a PointCloud object
+    or a face-less mesh (how most .ply point clouds import), else None."""
+    if obj.type == 'POINTCLOUD':
+        return 'POINTS'
+    if obj.type == 'MESH':
+        return 'MESH' if len(obj.data.polygons) else 'POINTS'
+    return None
+
+
+def find_color_attribute(data, preferred=None):
+    """Point-domain colour attribute, preferring `preferred`, then the active
+    colour, then whatever colour attribute exists.
+
+    Imported clouds name it all sorts of things - Col, Color, COLOR_0 - so
+    look rather than assume.
+    """
+    attrs = data.attributes
+    if preferred and preferred in attrs:
+        a = attrs[preferred]
+        if a.domain == 'POINT' and a.data_type in POINT_COLOR_TYPES:
+            return a
+    ca = getattr(data, "color_attributes", None)
+    if ca is not None and ca.active_color is not None:
+        a = ca.active_color
+        if a.domain == 'POINT' and a.data_type in POINT_COLOR_TYPES:
+            return a
+    for a in attrs:
+        if a.domain == 'POINT' and a.data_type in POINT_COLOR_TYPES:
+            return a
+    return None
+
+
+def read_point_arrays(obj, preferred_attr):
+    """(P (N,3), C (N,4), incoming_radius|None, colour attribute name|None).
+
+    Reads an already-existing cloud rather than making one: no bake, no
+    scatter. `color` comes back linear for both FLOAT_COLOR and BYTE_COLOR,
+    Blender handles the byte decode.
+    """
+    d = obj.data
+    if obj.type == 'POINTCLOUD':
+        n = len(d.points)
+        P = np.empty(n * 3, dtype=np.float32)
+        if n:
+            d.attributes["position"].data.foreach_get("vector", P)
+    else:
+        n = len(d.vertices)
+        P = np.empty(n * 3, dtype=np.float32)
+        if n:
+            d.vertices.foreach_get("co", P)
+    P = P.reshape(n, 3)
+
+    C = np.tile(GREY, (n, 1))
+    ca = find_color_attribute(d, preferred_attr)
+    if ca is not None and len(ca.data) == n and n:
+        buf = np.empty(n * 4, dtype=np.float32)
+        ca.data.foreach_get("color", buf)
+        C = buf.reshape(n, 4)
+
+    incoming_radius = None
+    ra = d.attributes.get("radius")
+    if ra is not None and ra.domain == 'POINT' and ra.data_type == 'FLOAT' \
+            and len(ra.data) == n and n:
+        buf = np.empty(n, dtype=np.float32)
+        ra.data.foreach_get("value", buf)
+        buf = buf[buf > 0.0]
+        if len(buf):
+            incoming_radius = float(np.median(buf))
+
+    return P, C, incoming_radius, (ca.name if ca is not None else None)
+
+
 def surface_area(obj):
     """World-space surface area, in square metres."""
     me = obj.data

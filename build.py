@@ -21,7 +21,8 @@ import bpy
 import numpy as np
 
 from . import pointops
-from .colour import bake_onto, surface_area, triangle_arrays
+from .colour import (bake_onto, input_kind, read_point_arrays, surface_area,
+                     triangle_arrays)
 
 
 # ---------------------------------------------------------------- sizing
@@ -144,6 +145,57 @@ def point_cloud_group(cfg, mat, density, radius, key):
     return ng, s_rad, s_den
 
 
+def display_group(mat):
+    """Shared display group: scale the per-point radius and set the material.
+
+    Deliberately reads the stored `radius` attribute and multiplies it, rather
+    than exposing an absolute radius. That keeps ONE group correct for every
+    object regardless of scale - an absolute value in a shared group would be
+    wrong for all but one of them, and per-modifier overrides don't survive
+    the operator's undo push.
+    """
+    name = "Mixtli_Display"
+    ng = bpy.data.node_groups.get(name)
+    if ng is None:
+        ng = bpy.data.node_groups.new(name, 'GeometryNodeTree')
+    else:
+        ng.interface.clear()
+        ng.nodes.clear()
+
+    ng.interface.new_socket("Geometry", in_out='INPUT', socket_type='NodeSocketGeometry')
+    ng.interface.new_socket("Geometry", in_out='OUTPUT', socket_type='NodeSocketGeometry')
+    s_scale = ng.interface.new_socket("Radius Scale", in_out='INPUT',
+                                      socket_type='NodeSocketFloat')
+    s_scale.default_value = 1.0
+    s_scale.min_value = 0.0
+
+    n = ng.nodes
+    gi = n.new("NodeGroupInput");  gi.location = (-560, 0)
+    go = n.new("NodeGroupOutput"); go.location = (300, 0)
+    rin = n.new("GeometryNodeInputRadius"); rin.location = (-560, -160)
+    mul = n.new("ShaderNodeMath"); mul.location = (-360, -120)
+    mul.operation = 'MULTIPLY'
+    rad = n.new("GeometryNodeSetPointRadius"); rad.location = (-150, 0)
+    setm = n.new("GeometryNodeSetMaterial"); setm.location = (70, 0)
+    setm.inputs["Material"].default_value = mat
+
+    ng.links.new(rin.outputs[0], mul.inputs[0])
+    ng.links.new(gi.outputs["Radius Scale"], mul.inputs[1])
+    ng.links.new(gi.outputs["Geometry"], rad.inputs["Points"])
+    ng.links.new(mul.outputs[0], rad.inputs["Radius"])
+    ng.links.new(rad.outputs["Points"], setm.inputs["Geometry"])
+    ng.links.new(setm.outputs["Geometry"], go.inputs[0])
+    return ng, s_scale
+
+
+def apply_display_group(obj, mat):
+    ng, s_scale = display_group(mat)
+    mod = obj.modifiers.new("Mixtli Display", 'NODES')
+    mod.node_group = ng
+    set_modifier_input(mod, s_scale.identifier, 1.0)
+    return mod
+
+
 def set_modifier_input(mod, identifier, value):
     """Blender 5.x moved geometry-nodes modifier inputs off IDProperties onto
     mod.properties.inputs; 4.x and earlier used mod[identifier]."""
@@ -193,6 +245,74 @@ def build_pointcloud_object(name, P, C, radius, mat, matrix, collections, attr_n
 
 
 # ---------------------------------------------------------------- pipelines
+
+def points_radius(P, cfg, incoming_radius):
+    """Radius for an incoming cloud, which has no surface area to measure."""
+    if cfg.radius_mode == 'MANUAL':
+        return max(cfg.point_radius, 1e-6)
+    if cfg.voxel_size > 0.0:
+        return max(cfg.voxel_size * cfg.radius_factor, 1e-6)
+    if incoming_radius:
+        return incoming_radius            # whatever the import already carried
+    n = max(len(P), 1)
+    dims = np.maximum(P.max(0) - P.min(0), 1e-9)
+    vol = float(dims[0] * dims[1] * dims[2])
+    spacing = (vol / n) ** (1.0 / 3.0) if vol > 0 else float(dims.max()) / 100.0
+    return max(spacing * cfg.radius_factor, 1e-6)
+
+
+def process_points(src, cfg, report):
+    """Input is already a cloud - a PointCloud object, or a .ply imported as a
+    face-less mesh. Nothing to bake or scatter, so read it, optionally grid
+    it, and hand back a PointCloud with a material and a radius."""
+    what = "point cloud" if src.type == 'POINTCLOUD' else "face-less mesh"
+    report.append("%s (%s)" % (src.name, what))
+
+    P, C, incoming_radius, cname = read_point_arrays(src, cfg.attr_name)
+    if len(P) == 0:
+        report.append("  no points")
+        return None
+    report.append("  %d points, colour from %s"
+                  % (len(P), ("'%s'" % cname) if cname else "none - using grey"))
+
+    anchored = cfg.world_anchored
+    if cfg.voxel_size > 0.0 and cfg.min_cell_points > 1:
+        P, C, dropped = pointops.filter_sparse_cells(
+            P, C, cfg.voxel_size, cfg.min_cell_points, anchored)
+        report.append("  dropped %d points in cells with < %d points"
+                      % (dropped, cfg.min_cell_points))
+
+    if cfg.voxel_size > 0.0:
+        before = len(P)
+        P, C, counts = pointops.voxel_downsample(
+            P, C, cfg.voxel_size, cfg.grid_mode, anchored)
+        report.append("  voxel %.4g m (%s%s): %d -> %d points, %.1f per cell"
+                      % (cfg.voxel_size, cfg.grid_mode.lower(),
+                         ", anchored" if anchored else "", before, len(P),
+                         float(counts.mean()) if len(counts) else 0.0))
+
+    if len(P) == 0:
+        report.append("  nothing left after filtering")
+        return None
+
+    radius = points_radius(P, cfg, incoming_radius)
+    report.append("  radius %.4g m" % radius)
+    mat = point_material(cfg)
+    obj = build_pointcloud_object(src.name + cfg.suffix, P, C, radius, mat,
+                                  src.matrix_world.copy(),
+                                  src.users_collection, cfg.attr_name)
+    if cfg.display_group:
+        apply_display_group(obj, mat)
+
+    if cfg.export_ply and cfg.ply_path:
+        path = bpy.path.abspath(cfg.ply_path)
+        try:
+            n = pointops.write_ply(path, P, C)
+            report.append("  wrote %d points to %s" % (n, path))
+        except Exception as e:
+            report.append("  PLY export failed: %s" % e)
+    return obj
+
 
 def process_grid(src, cfg, report):
     """Python owns everything here: bake onto a scratch copy, scatter,
@@ -245,6 +365,8 @@ def process_grid(src, cfg, report):
     obj = build_pointcloud_object(src.name + cfg.suffix, P, C, radius, mat,
                                   src.matrix_world.copy(),
                                   src.users_collection, cfg.attr_name)
+    if cfg.display_group:
+        apply_display_group(obj, mat)
 
     if cfg.export_ply and cfg.ply_path:
         path = bpy.path.abspath(cfg.ply_path)
@@ -257,6 +379,8 @@ def process_grid(src, cfg, report):
 
 
 def process(obj, cfg, report):
+    if input_kind(obj) == 'POINTS':
+        return process_points(obj, cfg, report)   # already a cloud
     if cfg.point_source == 'GRID':
         return process_grid(obj, cfg, report)
 
