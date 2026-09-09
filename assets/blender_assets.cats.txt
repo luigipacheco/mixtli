@@ -1,0 +1,12 @@
+# This is an Asset Catalog Definition file for Blender.
+#
+# Empty lines and lines starting with `#` will be ignored.
+# The first non-ignored line should be the version indicator.
+# Other lines are of the format "UUID:catalog/path/for/assets:simple catalog name"
+
+VERSION 1
+
+00d7efa7-6196-56c3-b8e2-eaf648cc9df6:Mixtli/Selection and Distance:Mixtli-Selection and Distance
+ad86a652-2a3d-5547-ac13-6702b0c36b34:Mixtli/Display:Mixtli-Display
+2c85703b-77d3-552e-9bd2-af0224e44ece:Mixtli/Utilities:Mixtli-Utilities
+7d587310-a2dc-5e4e-b362-5fa813d6edad:Mixtli/Starters:Mixtli-Starters

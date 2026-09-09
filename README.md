@@ -57,6 +57,25 @@ you can stack geometry nodes on it afterwards.
 *Cell Centre grid, post-processed in geometry nodes: distance to the sphere
 drives a Map Range into a colour mix.*
 
+## Node group assets
+
+Mixtli ships a library of geometry-node groups built for point clouds, and
+registers it as an asset library on install. Open the Asset Browser and look
+under **Mixtli**, or drag a group straight into a geometry-nodes tree.
+
+| Catalog | Groups |
+|---|---|
+| Selection and Distance | point / multi-point / curve-corridor attractors, inside-a-closed-object, height band, plane slice, multiple plane slices, surface distance, attribute range |
+| Display | heatmap point display |
+| Utilities | combine selections, point statistics, points adapter, falloff curve |
+| Starters | ready-made single-attractor and multi-plane setups |
+
+Most analysis groups output `Distance`, `Influence`, `Selection` and `Valid`,
+so they compose: feed any of them into **MX 10 | Heatmap point display** to
+colour by the result, or into **MX 09 | Combine selections** to intersect two
+of them. **MX 12 | Points adapter** takes a mesh or a point cloud and hands
+back points, so the groups work on either.
+
 ## Notes
 
 Colour comes from reading texture pixels through the UVs - no bake, no UV
