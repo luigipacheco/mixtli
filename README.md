@@ -165,6 +165,24 @@ stacks class, quality flag, surface direction and a channel ratio.*
 
 **MX 10 | Heatmap point display** turns any analysis result into colour.
 
+**Color Mode** decides how each point's colour is built:
+
+| Mode | Colour |
+|---|---|
+| Heatmap | the analysis colour on its own |
+| Mix | the analysis colour with the source colour blended over it by **Original Color Mix** |
+| Source | the cloud's own colour, untouched |
+| Multiply | the source colour modulated by the analysis colour, so texture detail survives the tint |
+
+On a photogrammetry cloud, *Multiply* is usually what you want: the city still
+looks like the city, and the analysis reads as a tint over it. Every mode falls
+back to the analysis colour when the source attribute is missing, so nothing
+ever comes out black.
+
+- **Recolor Selection Only** - only selected points take the Color Mode colour;
+  everything outside the selection keeps its own colour. Use it to recolour
+  just what falls inside an attractor's influence radius and leave the rest of
+  the cloud looking like itself.
 - **Heatmap Low / Mid Low / Mid High / High** - four stops across the
   normalised value.
 - **Use Selection Colors** - flat selected/unselected colours instead of the
@@ -172,9 +190,8 @@ stacks class, quality flag, surface direction and a channel ratio.*
 - **Size By Value** with **Radius Gain** - magnitude reads as size as well as
   hue.
 - **Isolate Selection** - delete unselected points rather than dimming them.
-  **Unselected Brightness** sets the dimming when it is off.
-- **Original Color Mix** - blend the source colour back over the analysis, so
-  the photographic texture stays underneath.
+  **Unselected Brightness** sets the dimming when it is off, and applies in
+  every Color Mode.
 
 It also writes `mx_value`, `mx_weight`, `mx_selected`, `mx_valid` and
 `mx_viz_color` as point attributes, so later nodes - or a script - can read

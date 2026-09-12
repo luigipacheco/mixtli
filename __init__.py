@@ -5,14 +5,16 @@ Mixtli - flatten materials to colour attributes and build point clouds.
 Metadata lives in blender_manifest.toml; extensions must not declare bl_info.
 """
 
-from . import assets, ui
+from . import assets, compat, ui
 
 
 def register():
     ui.register()
     assets.register()
+    compat.register()
 
 
 def unregister():
+    compat.unregister()
     assets.unregister()
     ui.unregister()
