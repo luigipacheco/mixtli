@@ -72,6 +72,10 @@ def _fix_modifier(mod, defaults):
 
 def repair():
     """Set every unset Mixtli menu socket to the value it used to behave as."""
+    if not hasattr(bpy.data, "node_groups"):
+        # bpy.data is a _RestrictData proxy while add-ons register at startup.
+        # Nothing to repair yet either way: the file has not been read.
+        return 0
     fixed = 0
     for group in bpy.data.node_groups:
         if group.library:                    # linked data is the library's to fix
@@ -97,12 +101,33 @@ def _on_load(_file):
     repair()
 
 
+def _deferred_repair():
+    """Repair the file that was already open when the add-on was enabled."""
+    try:
+        repair()
+    except Exception as e:                       # never take registration down
+        print("[mixtli] menu socket repair skipped: %s" % e)
+    return None                                  # run once, do not reschedule
+
+
 def register():
     if _on_load not in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.append(_on_load)
-    repair()
+    # Enabling at startup happens before the blend file is read and while
+    # bpy.data is restricted, so the one-off repair waits for the first tick
+    # of the event loop. Background mode has no loop; load_post still covers it.
+    try:
+        if not bpy.app.timers.is_registered(_deferred_repair):
+            bpy.app.timers.register(_deferred_repair, first_interval=0.0)
+    except Exception as e:
+        print("[mixtli] could not schedule menu socket repair: %s" % e)
 
 
 def unregister():
     if _on_load in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.remove(_on_load)
+    try:
+        if bpy.app.timers.is_registered(_deferred_repair):
+            bpy.app.timers.unregister(_deferred_repair)
+    except Exception:
+        pass
