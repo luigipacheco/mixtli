@@ -197,6 +197,84 @@ It also writes `mx_value`, `mx_weight`, `mx_selected`, `mx_valid` and
 `mx_viz_color` as point attributes, so later nodes - or a script - can read
 what it decided.
 
+## GIS data
+
+Bring a site's map data onto its point cloud: which building, landuse, park
+or road each point belongs to, as point attributes you can colour by in one
+click. Open **Mixtli > GIS Data**.
+
+1. **Georeference.** Import the site with
+   [Blosm](https://github.com/vvoovv/blender-osm) - Google 3D Tiles, OSM,
+   terrain - and Mixtli reads the `scene["lat"]` / `scene["lon"]` it leaves
+   behind. No Blosm? Choose *Manual*, type the origin, and **Write for Blosm**
+   so later Blosm imports land in the same place.
+2. **Get GIS Data** for the selected cloud(s):
+
+   | Source | What |
+   |---|---|
+   | OpenStreetMap | downloaded from the Overpass API for the cloud's area, plus **Padding** |
+   | GeoJSON File | any WGS84 GeoJSON - QGIS exports, city open-data portals |
+   | OGC API Features | a standards-based feature server's `.../collections/{id}/items` URL |
+
+   **Fields** lists the tags to fetch and map; blank maps every property.
+   The data is kept in the text block `Mixtli GIS.geojson`, so it downloads
+   once and re-maps offline.
+3. **Map to Points** writes `gis_*` attributes and colours the cloud by the
+   first one:
+
+   | Attribute | Type | Meaning |
+   |---|---|---|
+   | `gis_building`, `gis_landuse`, ... | INT | tag value as a code, 0 = none; labels in the legend |
+   | `gis_height`, `gis_building_levels`, ... | FLOAT | numeric tags (`"12 m"` reads as 12), 0 = none |
+   | `gis_inside` | BOOL | inside any polygon |
+   | `gis_feature` | INT | index of the smallest polygon containing the point |
+   | `gis_line_dist` | FLOAT | metres to the nearest road / line, capped at **Line Distance** |
+   | `gis_line_highway`, ... | INT | the nearest line's tag |
+
+   Polygons nest: a point on a building inside a residential block gets both
+   `building` and `landuse`. Each key comes from the smallest polygon that
+   has it.
+4. **Check Alignment** before trusting it. It slides the building footprints
+   over the cloud's roofs, scores every shift, and reports the best one - in
+   both of Blosm's frames - with an OpenStreetMap link for the cloud centre.
+   If the fit is off, **Apply Suggested Fix** and map again. **Draw
+   Features** puts the outlines over the cloud as wire edges, for checking
+   by eye from the top view.
+
+**View by Attribute** colours any point attribute - GIS, LiDAR
+classification, intensity, anything scalar. Categories get a legend you can
+recolour and switch off value by value; numbers get a ramp with editable
+bounds. It adds a *Mixtli View* modifier last on the stack; **Source
+Colour** takes it away again. The attributes are ordinary ones, so the
+analysis groups read them too: `gis_landuse` into **MX 21 | Class ID
+selection**, `gis_height` into **MX 27 | Scalar field rule**.
+
+### Frames
+
+Blosm places data in two different ways, and they do not agree:
+
+- **OSM / Terrain** - a spherical Transverse Mercator about the scene origin.
+- **3D Tiles** - true earth-centred coordinates rotated to the origin, with a
+  slight tilt from using geocentric latitude.
+
+They drift apart by 0.2-0.7% of the distance from the origin (2-7 m per km),
+and the tilt adds about 0.2% of the ground height: roughly 5 m in a city at
+2,200 m. So features must be mapped in the frame the cloud was imported in.
+*Auto* picks 3D Tiles when the cloud sits in a Blosm "3D Tiles" collection,
+which is where a cloud made from tiles lands; **Check Alignment** tells you if
+the other frame fits better.
+
+Map data must be in WGS84 (EPSG:4326). Reproject in QGIS first if it is not.
+OpenStreetMap data is (c) OpenStreetMap contributors, under the ODbL. Credit
+it wherever the result is shown. Downloading needs **Allow Online Access** in
+Blender's preferences; nothing goes online unless you click **Get GIS Data**
+with an online source.
+
+Attributes go onto real points: a `PointCloud` (Regular Grid output, or an
+imported cloud) or a mesh's vertices. A live *Scatter on Faces* cloud
+interpolates vertex attributes across its points, which blurs category edges.
+Use Regular Grid output for crisp boundaries.
+
 ## Notes
 
 Colour comes from reading texture pixels through the UVs - no bake, no UV
