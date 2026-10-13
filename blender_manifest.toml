@@ -24,8 +24,8 @@ copyright = [
 # only used when the user clicks Get GIS Data with an online source, and only
 # with Blender's Allow Online Access on; files only at paths the user chooses.
 [permissions]
-files = "Export point clouds to PLY and read or save GeoJSON files chosen by the user"
-network = "Download OpenStreetMap features (Overpass API) or OGC API Features for the area of a point cloud"
+files = "Export PLY, read and save GeoJSON files chosen by the user"
+network = "Download OpenStreetMap or OGC API features for a cloud area"
 
 [build]
 paths_exclude_pattern = [
