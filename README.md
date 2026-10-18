@@ -7,8 +7,9 @@
 Mixtli brings point clouds into Blender, gives you tools to interrogate them,
 and renders the answer.
 
-- **Generate** - from a textured mesh, however many material slots it carries,
-  or from a cloud you already have.
+- **Generate** - from Google Photorealistic 3D Tiles for any place, from a
+  textured mesh however many material slots it carries, or from a LiDAR or
+  scan file you already have.
 - **Analyse** - select by distance, section, volume, height, or by an attribute
   the cloud came with.
 - **Visualise** - results come out as colour, ready to light and render.
@@ -25,11 +26,26 @@ then **Edit > Preferences > Get Extensions > Install from Disk**.
 
 Blender 4.2 or newer. Works in EEVEE and Cycles.
 
-## Quick start
+## Quick start: a site in three clicks
+
+1. Put a Google Maps API key in **Edit > Preferences > Add-ons > Mixtli**
+   (see [Google key](#google-key)).
+2. Press `N` in the 3D view, open **Mixtli > Site from Google 3D Tiles**, and
+   type a place - an address, a landmark, or `lat, lon` copied from Google
+   Maps.
+3. Click **Build Site**.
+
+Mixtli downloads the 3D Tiles around the place, turns them into a gridded
+point cloud, downloads OpenStreetMap for the same area, maps it onto the
+points and colours the cloud by the first GIS attribute. Pick another one
+in **View by Attribute**, or click **Above Ground** for building and canopy
+heights.
+
+## Quick start: a mesh or scan
 
 1. Select a textured mesh - or an imported point cloud, either works.
 2. Press `N` in the 3D view and open the **Mixtli** tab.
-3. Click **Mesh to Colour Point Cloud**.
+3. Click **Make Point Cloud**.
 4. Leave the defaults and confirm.
 
 You get a new `<name>_pointcloud` object. The original is never modified.
@@ -85,6 +101,83 @@ across objects of any scale.
 
 *Cell Centre grid, post-processed in geometry nodes: distance to the sphere
 drives a Map Range into a colour mix.*
+
+## Site from Google 3D Tiles
+
+**Mixtli > Site from Google 3D Tiles** imports Google's Photorealistic 3D
+Tiles straight from the Map Tiles API. No other add-on is needed.
+
+| Setting | What it does |
+|---|---|
+| Place | an address or place name (looked up on OpenStreetMap Nominatim), or `lat, lon` |
+| Radius | tiles within this horizontal distance of the place |
+| Detail | *Low* for massing over big areas, *Medium* for buildings, *High* for facades and trees, *Max* for the finest tiles (small areas only) |
+| Point Cloud / GIS Data | which steps **Build Site** runs after the import |
+| Point Spacing | voxel size of the cloud made from the tiles |
+
+**Build Site** runs the whole chain: tiles, then a Regular Grid point cloud,
+then OpenStreetMap through **Get GIS Data** and **Map to Points**. Each step
+is the ordinary operator, so you can also run them one at a time:
+**Import Tiles Only**, then **Point Cloud > Make Point Cloud**, then
+**GIS Data**.
+
+The tiles land as one textured mesh in a *Google 3D Tiles* collection, in
+the same earth-centred frame Blosm uses for 3D Tiles. Mixtli writes
+`scene["lat"]` / `scene["lon"]` the way Blosm does. A second site within
+20 km reuses that origin, so neighbouring imports, Blosm data and GIS
+features all line up. The tile transforms are composed in double precision
+before anything reaches Blender, which stores float32. Doing it the other
+way round would round earth-centred coordinates to half a metre.
+
+**Max Tiles** under Options (600 by default) refuses a request before
+anything is downloaded, so a radius that is too big for the detail level
+does not turn into thousands of downloads.
+
+### Google key
+
+1. [console.cloud.google.com](https://console.cloud.google.com) > create a
+   project with billing enabled.
+2. **APIs & Services > Library > Map Tiles API > Enable**.
+3. **Credentials > Create credentials > API key**. Restricting it to the Map
+   Tiles API is a good idea.
+4. Paste it into **Preferences > Add-ons > Mixtli**, or set the
+   `GOOGLE_MAPS_API_KEY` environment variable.
+
+The key is kept in your Blender preferences and never saved in the .blend
+file. Google bills tile requests past a monthly free allowance, and its
+terms apply to the tiles: show the data attribution wherever the result is
+shown. Mixtli stores the credit line from the tiles on the object, as
+`mixtli_tiles`, and prints it after every import.
+
+## Import point cloud files
+
+**File > Import > Point Cloud - LAS, PLY, XYZ (Mixtli)**, or **Import LAS /
+PLY / XYZ** in the Point Cloud panel. Every attribute the file carries comes
+through as a point attribute:
+
+| Format | Attributes |
+|---|---|
+| LAS 1.0-1.4, point formats 0-10 | `classification`, `intensity`, `return_number`, `number_of_returns`, `scan_angle`, `user_data`, `point_source_id`, `gps_time`, `nir`, `withheld`, colour |
+| PLY, ASCII or binary | every vertex property: colour, `normal`, and scalar fields such as confidence or curvature |
+| XYZ / TXT / CSV / PTS | named by a header line, or by column count: xyz, xyzi, xyzrgb, xyzirgb |
+
+LiDAR comes in map coordinates far from the origin, where float32 runs out
+of precision. **Recentre** shifts it near the origin and records the shift
+as `mixtli_origin`. Files imported later get the same shift, so adjacent
+tiles stay aligned. **Thin to Voxel** keeps one point per cell on the way
+in. A classified file opens coloured by `classification`, with ASPRS names
+in the legend.
+
+LAZ is not supported: it is compressed with a codec numpy cannot read.
+Decompress it first with `laszip -i in.laz -o out.las` or `pdal translate`,
+or save it as LAS from CloudCompare. GIS mapping needs a lat/lon
+georeference (tiles or Blosm). Projected LiDAR coordinates are not
+reprojected.
+
+Gridding an existing cloud with **Make Point Cloud** keeps its attributes.
+Numbers are averaged per cell. Class codes, GIS categories and booleans take
+the most common value in the cell, because the average of *ground* and
+*building* is not a class.
 
 ## Analyse
 
@@ -203,11 +296,11 @@ Bring a site's map data onto its point cloud: which building, landuse, park
 or road each point belongs to, as point attributes you can colour by in one
 click. Open **Mixtli > GIS Data**.
 
-1. **Georeference.** Import the site with
-   [Blosm](https://github.com/vvoovv/blender-osm) - Google 3D Tiles, OSM,
-   terrain - and Mixtli reads the `scene["lat"]` / `scene["lon"]` it leaves
-   behind. No Blosm? Choose *Manual*, type the origin, and **Write for Blosm**
-   so later Blosm imports land in the same place.
+1. **Georeference.** Import the site with **Site from Google 3D Tiles**, or
+   with [Blosm](https://github.com/vvoovv/blender-osm) (OSM, terrain), and
+   Mixtli reads the `scene["lat"]` / `scene["lon"]` that the import leaves
+   behind. For anything else, choose *Manual*, type the origin, and **Write
+   for Blosm** so that later imports land in the same place.
 2. **Get GIS Data** for the selected cloud(s):
 
    | Source | What |
@@ -241,14 +334,6 @@ click. Open **Mixtli > GIS Data**.
    Features** puts the outlines over the cloud as wire edges, for checking
    by eye from the top view.
 
-**View by Attribute** colours any point attribute - GIS, LiDAR
-classification, intensity, anything scalar. Categories get a legend you can
-recolour and switch off value by value; numbers get a ramp with editable
-bounds. It adds a *Mixtli View* modifier last on the stack; **Source
-Colour** takes it away again. The attributes are ordinary ones, so the
-analysis groups read them too: `gis_landuse` into **MX 21 | Class ID
-selection**, `gis_height` into **MX 27 | Scalar field rule**.
-
 ### Frames
 
 Blosm places data in two different ways, and they do not agree:
@@ -274,6 +359,32 @@ Attributes go onto real points: a `PointCloud` (Regular Grid output, or an
 imported cloud) or a mesh's vertices. A live *Scatter on Faces* cloud
 interpolates vertex attributes across its points, which blurs category edges.
 Use Regular Grid output for crisp boundaries.
+
+## View by Attribute
+
+**View by Attribute** colours the active cloud by any point attribute: GIS,
+LiDAR classification, intensity, scalar fields, colours or normals. Pick it
+from the search field, or click one of the buttons listed under it. The
+cloud recolours at once.
+
+- **Categories** get a legend. You can recolour each value and switch it
+  off. **Hide Off / Out of Range** removes switched-off values instead of
+  dimming them, so you can isolate *building* or *park*.
+- **Numbers** get a ramp (*Viridis*, *Terrain*, *Heat*, *Diverging*, *Grey*)
+  with editable **Low** / **High** bounds. With hiding on, the bounds act
+  as a filter: everything over 20 m, every point within 5 m of a road.
+- **Colours** show as they are, and **vectors** (normals) show as a normal
+  map.
+- **Elevation** writes each point's world Z as `elevation`. **Above
+  Ground** writes `height_above_ground`, measured from the lowest ground
+  within 60 m. That is good for building and canopy heights; on steep
+  slopes it reads high.
+
+All of this goes through a *Mixtli View* modifier placed last on the
+stack. **Source Colour** removes it again.
+
+The attributes are ordinary ones, so the analysis groups read them too: `gis_landuse` into **MX 21 | Class ID
+selection**, `gis_height` into **MX 27 | Scalar field rule**.
 
 ## Notes
 

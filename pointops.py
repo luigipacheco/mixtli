@@ -104,7 +104,7 @@ def cell_index(P, voxel, world_anchored=True):
     return np.floor((P - origin) / voxel).astype(np.int64), origin
 
 
-def filter_sparse_cells(P, C, voxel, min_count, world_anchored=True):
+def filter_sparse_cells(P, C, voxel, min_count, world_anchored=True, extras=None):
     """Drop points sitting in thinly-populated cells.
 
     The cheap, grid-based cousin of a statistical outlier filter - no
@@ -115,22 +115,30 @@ def filter_sparse_cells(P, C, voxel, min_count, world_anchored=True):
         return P, C, 0
     idx, _ = cell_index(P, voxel, world_anchored)
     _, inv, counts = np.unique(idx, axis=0, return_inverse=True, return_counts=True)
-    keep = counts[inv] >= min_count
+    keep = counts[inv.ravel()] >= min_count
+    if extras:
+        for k, (kind, v) in list(extras.items()):
+            extras[k] = (kind, v[keep])
     return P[keep], C[keep], int((~keep).sum())
 
 
-def voxel_downsample(P, C, voxel, mode='CENTROID', world_anchored=True):
+def voxel_downsample(P, C, voxel, mode='CENTROID', world_anchored=True, extras=None):
     """One point per occupied cell.
 
     'CENTROID' averages the points in the cell, which follows the surface.
     'CENTER' snaps to the cell centre for a true regular lattice. Colour is
-    the cell mean either way.
+    the cell mean either way. `extras`, a dict of name -> (blender type,
+    array), is reduced in place: see reduce_cells.
     """
     if len(P) == 0:
         return P, C, np.zeros(0, np.int64)
     idx, origin = cell_index(P, voxel, world_anchored)
     key, inv, counts = np.unique(idx, axis=0, return_inverse=True, return_counts=True)
+    inv = inv.ravel()                    # numpy 2 can hand it back as (N, 1)
     n = len(key)
+    if extras:
+        for k, (kind, v) in list(extras.items()):
+            extras[k] = (kind, reduce_cells(kind, v, inv, n, counts))
     denom = counts[:, None]
     col = np.stack([np.bincount(inv, weights=C[:, k], minlength=n)
                     for k in range(4)], 1) / denom
@@ -140,6 +148,58 @@ def voxel_downsample(P, C, voxel, mode='CENTROID', world_anchored=True):
         pos = np.stack([np.bincount(inv, weights=P[:, k], minlength=n)
                         for k in range(3)], 1) / denom
     return pos.astype(np.float32), col.astype(np.float32), counts
+
+
+def reduce_cells(kind, v, inv, n, counts):
+    """One value per cell. Numbers and vectors average; integer codes and
+    booleans take the commonest value in the cell, because the mean of
+    'ground' and 'building' is not a class."""
+    if kind in ('FLOAT', 'FLOAT_VECTOR', 'FLOAT_COLOR'):
+        v2 = v.reshape(len(v), -1).astype(np.float64)
+        out = np.stack([np.bincount(inv, weights=v2[:, k], minlength=n)
+                        for k in range(v2.shape[1])], 1) / counts[:, None]
+        return out.reshape((n,) + v.shape[1:]).astype(np.float32)
+    pair, pc = np.unique(np.stack([inv, v.astype(np.int64)], 1), axis=0,
+                         return_counts=True)
+    order = np.lexsort((-pc, pair[:, 0]))        # by cell, commonest first
+    pair = pair[order]
+    first = np.r_[True, pair[1:, 0] != pair[:-1, 0]]
+    out = np.zeros(n, dtype=np.int64)
+    out[pair[first, 0]] = pair[first, 1]
+    return out.astype(bool) if kind == 'BOOLEAN' else out.astype(np.int32)
+
+
+# ---------------------------------------------------------------- terrain
+
+def height_above_ground(P, cell=5.0, window=60.0):
+    """Approximate height of each point over the local ground.
+
+    Ground is the lowest point per cell, then the lowest of those within
+    `window` - wide enough to see past most buildings to the street - so a
+    roof never mistakes itself for ground. Slopes steeper than the window
+    can resolve read as a few metres of height; good for massing and
+    canopy, not for survey.
+    """
+    P = np.asarray(P, dtype=np.float64)
+    if len(P) == 0:
+        return np.zeros(0, np.float32)
+    lo = P[:, :2].min(0)
+    ij = np.floor((P[:, :2] - lo) / cell).astype(np.int64)
+    w, h = ij.max(0) + 1
+    flat = ij[:, 1] * w + ij[:, 0]
+    g = np.full(w * h, np.inf)
+    np.minimum.at(g, flat, P[:, 2])
+    g = g.reshape(h, w)
+    r = max(int(round(window / cell / 2.0)), 1)
+    for axis in (0, 1):                      # separable min filter
+        pad = [(0, 0), (0, 0)]
+        pad[axis] = (r, r)
+        gp = np.pad(g, pad, constant_values=np.inf)
+        n = g.shape[axis]
+        g = np.min([np.take(gp, np.arange(k, k + n), axis=axis)
+                    for k in range(2 * r + 1)], axis=0)
+    ground = g.ravel()[flat]
+    return np.maximum(P[:, 2] - ground, 0.0).astype(np.float32)
 
 
 # ---------------------------------------------------------------- export

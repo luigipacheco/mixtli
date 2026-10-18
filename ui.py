@@ -1,13 +1,20 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Operator and sidebar panel."""
 
+import os
 import time
+import types
 
 import bpy
-from bpy.props import (BoolProperty, EnumProperty, FloatProperty,
+import numpy as np
+from bpy.props import (BoolProperty, CollectionProperty, EnumProperty, FloatProperty,
                        IntProperty, StringProperty)
+from bpy_extras.io_utils import ImportHelper
+from mathutils import Matrix
 
-from .build import process
+from . import pointio, pointops
+from .build import (apply_display_group, build_pointcloud_object, point_material,
+                    process)
 from .colour import input_kind, surface_area
 
 BIG_POINT_WARNING = 25_000_000
@@ -319,6 +326,113 @@ class MIXTLI_OT_pointcloud(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class MIXTLI_OT_import_points(bpy.types.Operator, ImportHelper):
+    """Import a LiDAR or scan file as a point cloud, keeping every attribute
+    it carries - classification, intensity, returns, normals, scalar fields"""
+    bl_idname = "import_scene.mixtli_points"
+    bl_label = "Import Point Cloud"
+    bl_options = {'REGISTER', 'UNDO', 'PRESET'}
+
+    filter_glob: StringProperty(default="*.las;*.ply;*.xyz;*.txt;*.csv;*.pts",
+                                options={'HIDDEN'})
+    files: CollectionProperty(type=bpy.types.OperatorFileListElement,
+                              options={'HIDDEN', 'SKIP_SAVE'})
+    directory: StringProperty(subtype='DIR_PATH', options={'HIDDEN', 'SKIP_SAVE'})
+    recentre: BoolProperty(
+        name="Recentre", default=True,
+        description="Move the data next to the scene origin. LiDAR comes in map "
+                    "coordinates far from 0, where Blender's precision runs out. "
+                    "Files imported later share the same shift, so tiles line up")
+    voxel_size: FloatProperty(
+        name="Thin to Voxel", default=0.0, min=0.0, soft_max=5.0, subtype='DISTANCE',
+        description="Keep one point per cell of this size. 0 keeps every point")
+    radius_factor: FloatProperty(name="Radius Factor", default=0.6, min=0.01, soft_max=3.0)
+    colour_by: EnumProperty(
+        name="Colour By",
+        items=[('AUTO', "Auto", "Classification if the file has it, else its own "
+                                "colour, else intensity"),
+               ('SOURCE', "File Colour", "The file's RGB, grey if it has none"),
+               ('NONE', "Nothing", "")],
+        default='AUTO')
+
+    def execute(self, context):
+        from . import view
+        paths = [os.path.join(self.directory, f.name) for f in self.files if f.name] \
+            or [self.filepath]
+        made, t0 = [], time.time()
+        for path in paths:
+            try:
+                cloud = pointio.read(path)
+            except (ValueError, OSError) as e:
+                self.report({'ERROR'}, "%s: %s" % (os.path.basename(path), e))
+                continue
+            obj = import_cloud(context, cloud, os.path.splitext(os.path.basename(path))[0],
+                               self)
+            if obj is None:
+                continue
+            made.append(obj)
+            names = obj.data.attributes
+            if self.colour_by == 'AUTO':
+                if "classification" in names and len(np.unique(
+                        cloud.attrs["classification"][1])) > 1:
+                    view.show(obj, "classification")
+                elif cloud.color is None and "intensity" in names:
+                    view.show(obj, "intensity")
+        if not made:
+            return {'CANCELLED'}
+        for o in context.view_layer.objects:
+            o.select_set(False)
+        for o in made:
+            o.select_set(True)
+        context.view_layer.objects.active = made[-1]
+        self.report({'INFO'}, "%d cloud(s), %s points in %.1fs" % (
+            len(made), fmt_count(sum(len(o.data.points) for o in made)), time.time() - t0))
+        return {'FINISHED'}
+
+
+def import_cloud(context, cloud, name, cfg):
+    """A Cloud from pointio -> a PointCloud object with all its attributes."""
+    P = cloud.position
+    if len(P) == 0:
+        return None
+    origin = np.zeros(3)
+    sc = context.scene
+    if cfg.recentre:
+        if "mixtli_file_origin" in sc:
+            origin = np.array(sc["mixtli_file_origin"], dtype=np.float64)
+        else:
+            c = (P.min(0) + P.max(0)) / 2.0
+            origin = np.array([np.round(c[0], -2), np.round(c[1], -2), 0.0])
+            if np.abs(origin).max() > 0:
+                sc["mixtli_file_origin"] = origin.tolist()
+    P = (P - origin).astype(np.float32)
+    C = cloud.color if cloud.color is not None else np.tile(pointops.GREY, (len(P), 1))
+    extras = dict(cloud.attrs)
+    if cfg.voxel_size > 0.0:
+        P, C, _ = pointops.voxel_downsample(P, C, cfg.voxel_size, 'CENTROID', True, extras)
+        spacing = cfg.voxel_size
+    else:
+        spacing = pointio.spacing(P)
+    radius = max(spacing * cfg.radius_factor, 1e-6)
+    pcfg = types.SimpleNamespace(attr_name="Col", emission_strength=1.0)
+    mat = point_material(pcfg)
+    coll = context.view_layer.active_layer_collection.collection
+    obj = build_pointcloud_object(name, P, C, radius, mat, Matrix.Identity(4), [coll],
+                                  "Col", extras)
+    if np.abs(origin).max() > 0:
+        obj["mixtli_origin"] = origin.tolist()
+    apply_display_group(obj, mat)
+    print("[mixtli] %s: %s; %d points, radius %.3g m%s" % (
+        name, "; ".join(cloud.info), len(P), radius,
+        ", shifted by %s" % origin.tolist() if np.abs(origin).max() > 0 else ""))
+    return obj
+
+
+def menu_import(self, context):
+    self.layout.operator(MIXTLI_OT_import_points.bl_idname,
+                         text="Point Cloud - LAS, PLY, XYZ (Mixtli)")
+
+
 class MIXTLI_PT_panel(bpy.types.Panel):
     bl_label = "Mixtli"
     bl_space_type = 'VIEW_3D'
@@ -326,25 +440,52 @@ class MIXTLI_PT_panel(bpy.types.Panel):
     bl_category = "Mixtli"
 
     def draw(self, context):
-        layout = self.layout
-        sel = [o for o in context.selected_objects if o.type == 'MESH']
-        col = layout.column()
-        col.scale_y = 1.4
-        col.operator("object.mixtli_pointcloud", icon='OUTLINER_OB_POINTCLOUD')
-        if not sel:
-            layout.label(text="Select a mesh object", icon='INFO')
+        obj = context.active_object
+        if obj is None:
+            self.layout.label(text="Site, then cloud, then GIS, then view", icon='INFO')
         else:
-            layout.label(text="%d mesh object(s) selected" % len(sel))
+            n = len(obj.data.points) if obj.type == 'POINTCLOUD' else \
+                len(obj.data.vertices) if obj.type == 'MESH' else 0
+            self.layout.label(text="%s  -  %s %s" % (
+                obj.name, fmt_count(n), "points" if input_kind(obj) == 'POINTS'
+                else "vertices"), icon='OBJECT_DATA')
 
 
-CLASSES = (MIXTLI_OT_pointcloud, MIXTLI_PT_panel)
+class MIXTLI_PT_points(bpy.types.Panel):
+    bl_label = "Point Cloud"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = "Mixtli"
+    bl_parent_id = "MIXTLI_PT_panel"
+    bl_order = 2
+
+    def draw(self, context):
+        layout = self.layout
+        col = layout.column()
+        col.scale_y = 1.3
+        col.operator("object.mixtli_pointcloud", icon='OUTLINER_OB_POINTCLOUD',
+                     text="Make Point Cloud")
+        layout.operator("import_scene.mixtli_points", text="Import LAS / PLY / XYZ",
+                        icon='IMPORT')
+        sel = [o for o in context.selected_objects if input_kind(o)]
+        if not sel:
+            layout.label(text="Select a mesh, scan or cloud to convert", icon='INFO')
+        else:
+            kinds = {input_kind(o) for o in sel}
+            layout.label(text="%d %s selected" % (len(sel), "cloud(s)" if kinds == {'POINTS'}
+                                                  else "object(s)"))
+
+
+CLASSES = (MIXTLI_OT_pointcloud, MIXTLI_OT_import_points, MIXTLI_PT_panel, MIXTLI_PT_points)
 
 
 def register():
     for c in CLASSES:
         bpy.utils.register_class(c)
+    bpy.types.TOPBAR_MT_file_import.append(menu_import)
 
 
 def unregister():
+    bpy.types.TOPBAR_MT_file_import.remove(menu_import)
     for c in reversed(CLASSES):
         bpy.utils.unregister_class(c)

@@ -225,7 +225,44 @@ def apply_group(obj, ng, s_rad, s_den, density, radius):
 
 # ---------------------------------------------------------------- pointcloud
 
-def build_pointcloud_object(name, P, C, radius, mat, matrix, collections, attr_name):
+EXTRA_TYPES = {'FLOAT': ("value", np.float32, 1), 'INT': ("value", np.int32, 1),
+               'INT8': ("value", np.int32, 1), 'BOOLEAN': ("value", bool, 1),
+               'FLOAT_VECTOR': ("vector", np.float32, 3),
+               'FLOAT_COLOR': ("color", np.float32, 4)}
+SKIP_EXTRAS = {"position", "radius", "id", "mx_view_color"}
+
+
+def read_extras(data, skip=()):
+    """Every other point attribute - intensity, classification, gis_*, normals -
+    as name -> (type, array), so it survives into the new cloud."""
+    out = {}
+    for a in data.attributes:
+        if a.domain != 'POINT' or a.data_type not in EXTRA_TYPES \
+                or a.name.startswith(".") or a.name in SKIP_EXTRAS or a.name in skip:
+            continue
+        prop, dt, k = EXTRA_TYPES[a.data_type]
+        buf = np.empty(len(a.data) * k, dtype=dt)
+        if len(buf):
+            a.data.foreach_get(prop, buf)
+        kind = 'INT' if a.data_type == 'INT8' else a.data_type
+        out[a.name] = (kind, buf.reshape(-1, k) if k > 1 else buf)
+    return out
+
+
+def write_extras(data, extras):
+    for name, (kind, v) in (extras or {}).items():
+        prop = EXTRA_TYPES[kind][0]
+        a = data.attributes.get(name)
+        if a is not None and (a.data_type != kind or a.domain != 'POINT'):
+            data.attributes.remove(a)
+            a = None
+        if a is None:
+            a = data.attributes.new(name, kind, 'POINT')
+        a.data.foreach_set(prop, np.ascontiguousarray(v).ravel())
+
+
+def build_pointcloud_object(name, P, C, radius, mat, matrix, collections, attr_name,
+                            extras=None):
     """A real PointCloud datablock, not a mesh with a modifier. Geometry
     nodes can still be stacked on top for post-processing."""
     pc = bpy.data.pointclouds.new(name)
@@ -236,6 +273,7 @@ def build_pointcloud_object(name, P, C, radius, mat, matrix, collections, attr_n
     ra.data.foreach_set("value", np.full(len(P), radius, dtype=np.float32))
     ca = pc.attributes.get(attr_name) or pc.attributes.new(attr_name, 'FLOAT_COLOR', 'POINT')
     ca.data.foreach_set("color", np.ascontiguousarray(C).ravel())
+    write_extras(pc, extras)
     pc.materials.append(mat)
     obj = bpy.data.objects.new(name, pc)
     obj.matrix_world = matrix
@@ -274,18 +312,21 @@ def process_points(src, cfg, report):
         return None
     report.append("  %d points, colour from %s"
                   % (len(P), ("'%s'" % cname) if cname else "none - using grey"))
+    extras = {k: v for k, v in read_extras(src.data, (cname,)).items() if len(v[1]) == len(P)}
+    if extras:
+        report.append("  carrying %s" % ", ".join(extras))
 
     anchored = cfg.world_anchored
     if cfg.voxel_size > 0.0 and cfg.min_cell_points > 1:
         P, C, dropped = pointops.filter_sparse_cells(
-            P, C, cfg.voxel_size, cfg.min_cell_points, anchored)
+            P, C, cfg.voxel_size, cfg.min_cell_points, anchored, extras)
         report.append("  dropped %d points in cells with < %d points"
                       % (dropped, cfg.min_cell_points))
 
     if cfg.voxel_size > 0.0:
         before = len(P)
         P, C, counts = pointops.voxel_downsample(
-            P, C, cfg.voxel_size, cfg.grid_mode, anchored)
+            P, C, cfg.voxel_size, cfg.grid_mode, anchored, extras)
         report.append("  voxel %.4g m (%s%s): %d -> %d points, %.1f per cell"
                       % (cfg.voxel_size, cfg.grid_mode.lower(),
                          ", anchored" if anchored else "", before, len(P),
@@ -300,7 +341,8 @@ def process_points(src, cfg, report):
     mat = point_material(cfg)
     obj = build_pointcloud_object(src.name + cfg.suffix, P, C, radius, mat,
                                   src.matrix_world.copy(),
-                                  src.users_collection, cfg.attr_name)
+                                  src.users_collection, cfg.attr_name, extras)
+    copy_georef(src, obj)
     if cfg.display_group:
         apply_display_group(obj, mat)
 
@@ -312,6 +354,16 @@ def process_points(src, cfg, report):
         except Exception as e:
             report.append("  PLY export failed: %s" % e)
     return obj
+
+
+GEO_PROPS = ("mixtli_gis", "mixtli_origin", "mixtli_tiles")
+
+
+def copy_georef(src, dst):
+    """GIS legends, file origin and tile credits follow the points."""
+    for k in GEO_PROPS:
+        if k in src:
+            dst[k] = src[k]
 
 
 def process_grid(src, cfg, report):
@@ -365,6 +417,7 @@ def process_grid(src, cfg, report):
     obj = build_pointcloud_object(src.name + cfg.suffix, P, C, radius, mat,
                                   src.matrix_world.copy(),
                                   src.users_collection, cfg.attr_name)
+    copy_georef(src, obj)
     if cfg.display_group:
         apply_display_group(obj, mat)
 

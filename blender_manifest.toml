@@ -3,13 +3,13 @@ schema_version = "1.0.0"
 id = "mixtli"
 name = "Mixtli"
 tagline = "Generate, analyse and visualise point clouds"
-version = "1.6.0"
+version = "1.7.0"
 type = "add-on"
 
 maintainer = "Luis Pacheco <luigipach@gmail.com>"
 website = "https://github.com/luigipacheco/mixtli"
 
-tags = ["Geometry Nodes", "Import-Export", "Object"]
+tags = ["Geometry Nodes", "Import-Export", "Object", "Scene"]
 
 blender_version_min = "4.2.0"
 
@@ -21,11 +21,12 @@ copyright = [
 ]
 
 # Pure Python + Blender's bundled numpy. No bundled wheels. The network is
-# only used when the user clicks Get GIS Data with an online source, and only
-# with Blender's Allow Online Access on; files only at paths the user chooses.
+# only used when the user clicks Find, Import Tiles, Build Site or Get GIS
+# Data, and only with Blender's Allow Online Access on; files only at paths
+# the user chooses.
 [permissions]
-files = "Export PLY, read and save GeoJSON files chosen by the user"
-network = "Download OpenStreetMap or OGC API features for a cloud area"
+files = "Import LAS/PLY/XYZ, export PLY, read and save GeoJSON files"
+network = "Google 3D Tiles, OpenStreetMap/OGC data and place search"
 
 [build]
 paths_exclude_pattern = [

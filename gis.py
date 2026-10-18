@@ -41,12 +41,14 @@ def georef(context):
     scene = context.scene
     if s.georef == 'SCENE':
         if "lat" in scene and "lon" in scene:
-            return float(scene["lat"]), float(scene["lon"]), "Blosm scene lat/lon"
+            return float(scene["lat"]), float(scene["lon"]), "scene lat/lon"
         return None
     return s.lat, s.lon, "manual"
 
 
 def detect_frame(obj):
+    if obj.get("mixtli_frame") in ('TM', 'TILES'):
+        return obj["mixtli_frame"]
     names = [obj.name] + [c.name for c in obj.users_collection]
     return 'TILES' if any("3d tiles" in n.lower() for n in names) else 'TM'
 
@@ -137,7 +139,7 @@ def features_for(obj, context, gj, offset=None):
     s = context.scene.mixtli_gis
     ref = georef(context)
     if ref is None:
-        raise RuntimeError("No georeference: import with Blosm first, or set it manually")
+        raise RuntimeError("No georeference: import 3D Tiles first, or set it manually")
     kind = frame_kind(obj, s)
     frame = geo.make_frame(kind, ref[0], ref[1])
     raw, skipped = gis_sources.parse_geojson(gj)
@@ -162,8 +164,8 @@ def write_report(lines):
 class MIXTLI_PG_gis(bpy.types.PropertyGroup):
     georef: EnumProperty(
         name="Georeference",
-        items=[('SCENE', "Blosm", "Use scene['lat'] / scene['lon'], which Blosm "
-                                  "writes on its first import"),
+        items=[('SCENE', "Scene", "Use scene['lat'] / scene['lon'], written by "
+                                  "Mixtli's tiles import or Blosm's first import"),
                ('MANUAL', "Manual", "Type the latitude and longitude of the "
                                     "scene origin")],
         default='SCENE')
@@ -252,7 +254,7 @@ class MIXTLI_OT_gis_fetch(bpy.types.Operator):
                     return {'CANCELLED'}
                 ref = georef(context)
                 if ref is None:
-                    self.report({'ERROR'}, "No georeference: import with Blosm first, "
+                    self.report({'ERROR'}, "No georeference: import 3D Tiles first, "
                                            "or set Georeference to Manual")
                     return {'CANCELLED'}
                 frame = geo.make_frame(frame_kind(objs[0], s), ref[0], ref[1])
@@ -521,8 +523,7 @@ class MIXTLI_PT_gis(bpy.types.Panel):
     bl_region_type = 'UI'
     bl_category = "Mixtli"
     bl_parent_id = "MIXTLI_PT_panel"
-    bl_order = 1
-    bl_options = {'DEFAULT_CLOSED'}
+    bl_order = 3
 
     def draw(self, context):
         layout = self.layout
@@ -537,7 +538,7 @@ class MIXTLI_PT_gis(bpy.types.Panel):
             col.prop(s, "lon")
             col.operator("scene.mixtli_gis_write_georef", icon='EXPORT')
         elif ref is None:
-            col.label(text="No Blosm import in this scene", icon='ERROR')
+            col.label(text="No site yet - import tiles above, or Manual", icon='ERROR')
         else:
             col.label(text="%.6f, %.6f" % ref[:2], icon='WORLD')
         row = layout.row(align=True)
