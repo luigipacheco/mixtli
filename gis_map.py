@@ -190,3 +190,73 @@ def map_features(xyz, features, fields, line_max=25.0, report=None):
             legends[name] = {"kind": "category", "key": k,
                              "labels": {str(c): v for v, c in leg.items()}}
     return attrs, legends
+
+
+# ---------------------------------------------------------------- corrections
+
+def apply_edits(attrs, legends, edits, report=None):
+    """Put back the corrections made by hand (view.py records them on the
+    object): a value given to whole features, by their ids, or to listed
+    points. Labels are matched by text, because codes are dealt out afresh
+    on every mapping; a label the data no longer has gets a new code."""
+    report = report if report is not None else []
+    ids = legends.get("gis_feature", {}).get("ids", [])
+    feature = attrs.get("gis_feature", (None, None))[1]
+    applied = 0
+    for e in edits:
+        name = e.get("attr")
+        if name not in attrs:
+            continue
+        kind, values = attrs[name]
+        meta = legends.get(name, {})
+        if "label" in e and kind == 'INT' and meta.get("kind") == "category":
+            labels = meta.setdefault("labels", {})
+            label = e["label"]
+            if label == "":
+                value = 0
+            else:
+                by_text = {v: int(k) for k, v in labels.items()}
+                value = by_text.get(label)
+                if value is None:
+                    value = max([int(k) for k in labels] + [0]) + 1
+                    labels[str(value)] = label
+        elif "label" in e and kind == 'BOOLEAN':
+            value = e["label"] in ("true", "1")
+        elif "value" in e and kind in ('FLOAT', 'INT'):
+            value = e["value"]
+        else:
+            continue
+        mask = np.zeros(len(values), dtype=bool)
+        if e.get("features") and feature is not None:
+            want = set(e["features"])
+            idx = [i for i, fid in enumerate(ids) if fid and fid in want]
+            if idx:
+                mask |= np.isin(feature, idx)
+        if e.get("points"):
+            idx = np.asarray(e["points"], dtype=np.int64)
+            idx = idx[(idx >= 0) & (idx < len(values))]
+            mask[idx] = True
+        if not mask.any():
+            continue
+        values[mask] = value
+        applied += 1
+    if edits:
+        report.append("  re-applied %d of %d correction%s"
+                      % (applied, len(edits), "" if len(edits) == 1 else "s"))
+    return applied
+
+
+def carry_added(legends, previous):
+    """Values typed into a legend by hand ("museum", say) are not in the map
+    data, so a fresh mapping would drop them. Give each one a code again."""
+    for name, leg in legends.items():
+        old = previous.get(name, {})
+        added = [t for t in old.get("added", []) if isinstance(t, str)]
+        if leg.get("kind") != "category" or not added:
+            continue
+        labels = leg.setdefault("labels", {})
+        for text in added:
+            if text not in labels.values():
+                code = max([int(k) for k in labels] + [0]) + 1
+                labels[str(code)] = text
+        leg["added"] = added

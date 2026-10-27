@@ -218,7 +218,11 @@ def parse_geojson(gj):
             skipped += 1
 
     for f in feats:
-        add(f.get("geometry"), dict(f.get("properties") or {}))
+        props = dict(f.get("properties") or {})
+        fid = f.get("id")                 # a Feature's own id, if the file gives one
+        if "@id" not in props and fid not in (None, ""):
+            props["@id"] = str(fid)
+        add(f.get("geometry"), props)
     out = [f for f in out if f[1]]
 
     for _, parts, _ in out[:50]:

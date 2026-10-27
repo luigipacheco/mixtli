@@ -119,7 +119,20 @@ class MIXTLI_OT_pointcloud(bpy.types.Operator):
     clear_slots: BoolProperty(
         name="Replace Material Slots", default=True,
         description="Drop the flattened slots and leave only the point material")
+    shader: EnumProperty(
+        name="Shader",
+        items=[('PRINCIPLED', "Principled BSDF",
+                "Lit by the scene like any other surface; the colour attribute "
+                "is the base colour"),
+               ('EMISSION', "Emission",
+                "Flat, unlit: the colour attribute straight to the screen")],
+        default='PRINCIPLED')
     emission_strength: FloatProperty(name="Emission Strength", default=1.0, min=0.0)
+    reset_material: BoolProperty(
+        name="Rebuild Material", default=False,
+        description="Build the point material afresh from these settings, "
+                    "discarding edits made to it in the Shader Editor. Off, "
+                    "an existing Mixtli material is reused as it is")
     cycles_samples: IntProperty(name="Cycles Samples", default=16, min=1, max=4096)
     cycles_bake_type: EnumProperty(
         name="Bake Pass",
@@ -203,7 +216,10 @@ class MIXTLI_OT_pointcloud(bpy.types.Operator):
                 box = layout.box()
                 box.use_property_split = True
                 box.prop(self, "attr_name")
-                box.prop(self, "emission_strength")
+                box.prop(self, "shader")
+                if self.shader == 'EMISSION':
+                    box.prop(self, "emission_strength")
+                box.prop(self, "reset_material")
                 box.prop(self, "suffix")
                 box.separator()
                 box.prop(self, "export_ply")
@@ -259,7 +275,10 @@ class MIXTLI_OT_pointcloud(bpy.types.Operator):
             box.prop(self, "method")
             box.prop(self, "attr_name")
             box.prop(self, "clear_slots")
-            box.prop(self, "emission_strength")
+            box.prop(self, "shader")
+            if self.shader == 'EMISSION':
+                box.prop(self, "emission_strength")
+            box.prop(self, "reset_material")
             if self.point_source != 'VERTS':
                 box.prop(self, "seed")
             box.prop(self, "bilinear")

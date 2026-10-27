@@ -243,11 +243,41 @@ click. Open **Mixtli > GIS Data**.
 
 **View by Attribute** colours any point attribute - GIS, LiDAR
 classification, intensity, anything scalar. Categories get a legend you can
-recolour and switch off value by value; numbers get a ramp with editable
-bounds. It adds a *Mixtli View* modifier last on the stack; **Source
-Colour** takes it away again. The attributes are ordinary ones, so the
-analysis groups read them too: `gis_landuse` into **MX 21 | Class ID
+recolour, rename and switch off value by value; numbers get a ramp with
+editable bounds. It adds a *Mixtli View* modifier last on the stack;
+**Source Colour** takes it away again. The attributes are ordinary ones, so
+the analysis groups read them too: `gis_landuse` into **MX 21 | Class ID
 selection**, `gis_height` into **MX 27 | Scalar field rule**.
+
+What you set up stays. Each attribute's legend - colours, toggles, names,
+ramp bounds - is remembered on the object, so switching to another attribute
+and back finds it as you left it. The view material (`Mixtli_mx_view_color`)
+and node group (`Mixtli_AttributeView`) are built once and never rebuilt
+behind your back: edit them in the Shader or Node Editor and the edits
+survive every change of attribute. The refresh button beside the legend
+rebuilds both from scratch when you do want a clean slate.
+
+### Correcting values
+
+Map data is wrong sometimes - the museum tagged as a shop - and LiDAR
+classes are wrong often. Fix them the way you would set a vertex weight:
+
+1. **Tab** into Edit Mode and select the points (box select from the top
+   view is usually enough). Point clouds need Blender 5.0+ for Edit Mode;
+   mesh clouds edit anywhere.
+2. Click the value in the legend. If it is not there yet, **+** adds one -
+   type `museum` - and it is kept on the object.
+3. **Assign**. With **Whole Feature** on, one point on a building is enough:
+   every point of each GIS feature the selection touches takes the value.
+   **Remove** sets the selection back to *none*; **Select** and
+   **Deselect** pick out every point carrying the active value, to check or
+   to build a selection from. Numbers get a field and **Assign** instead.
+
+Corrections to `gis_*` attributes are recorded on the object by feature id,
+so **Map to Points** puts them back after a remap - after fixing the
+alignment, say, or fetching more fields. The panel shows how many are kept;
+**x** forgets them. Renamed values are kept as names, not re-applied: a
+remap takes its names from the data again.
 
 ### Frames
 
@@ -282,10 +312,14 @@ unwrap, seconds not minutes. Shaders too complex to resolve fall back to a
 Cycles bake automatically. sRGB is decoded to linear so colours do not come
 out gamma-shifted.
 
-Both engines render Mixtli output the same way: the point material is an
-emission shader reading a colour attribute, which EEVEE and Cycles agree on.
-Cycles is needed only for the bake fallback, because EEVEE has no bake
-operator - and if Cycles is disabled, Mixtli tells you rather than failing.
+The point material reads the colour attribute into a Principled BSDF, so
+the points are lit like everything else in the scene and EEVEE and Cycles
+agree on them. **Shader: Emission** under Advanced gives the flat, unlit look
+instead. Either way the material is built once, per attribute name, and
+reused as it is on later runs - so your own edits to it stick - unless you
+tick **Rebuild Material**. Cycles is needed only for the bake fallback,
+because EEVEE has no bake operator - and if Cycles is disabled, Mixtli tells
+you rather than failing.
 
 Only needs numpy, which Blender already ships.
 

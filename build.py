@@ -66,9 +66,29 @@ def sizing(obj, cfg):
 
 # ---------------------------------------------------------------- materials
 
+def material_usable(mat):
+    """A material someone can look at: nodes on, and an output with a surface."""
+    if mat is None or not mat.use_nodes or mat.node_tree is None:
+        return False
+    return any(n.type == 'OUTPUT_MATERIAL' and n.inputs["Surface"].is_linked
+               for n in mat.node_tree.nodes)
+
+
 def point_material(cfg):
+    """The material that shows `cfg.attr_name`, one per attribute name.
+
+    Built once. An existing, working one is handed back untouched, so edits
+    made to it in the Shader Editor survive another run and every change of
+    view attribute. `cfg.reset_material` forces a rebuild from the settings.
+
+    `cfg.shader`: PRINCIPLED (default) feeds the colour into a Principled
+    BSDF, so the points are lit like everything else in the scene; EMISSION
+    is the old flat, unlit look, at `cfg.emission_strength`.
+    """
     name = "Mixtli_%s" % cfg.attr_name
     mat = bpy.data.materials.get(name)
+    if mat is not None and material_usable(mat) and not getattr(cfg, "reset_material", False):
+        return mat
     if mat is None:
         mat = bpy.data.materials.new(name)
     mat.use_nodes = True
@@ -77,13 +97,18 @@ def point_material(cfg):
     attr = nt.nodes.new("ShaderNodeVertexColor")
     attr.layer_name = cfg.attr_name
     attr.location = (-320, 0)
-    emis = nt.nodes.new("ShaderNodeEmission")
-    emis.inputs["Strength"].default_value = cfg.emission_strength
-    emis.location = (-120, 0)
     out = nt.nodes.new("ShaderNodeOutputMaterial")
-    out.location = (80, 0)
-    nt.links.new(attr.outputs["Color"], emis.inputs["Color"])
-    nt.links.new(emis.outputs["Emission"], out.inputs["Surface"])
+    out.location = (120, 0)
+    if getattr(cfg, "shader", 'PRINCIPLED') == 'EMISSION':
+        shader = nt.nodes.new("ShaderNodeEmission")
+        shader.inputs["Strength"].default_value = getattr(cfg, "emission_strength", 1.0)
+        nt.links.new(attr.outputs["Color"], shader.inputs["Color"])
+        nt.links.new(shader.outputs["Emission"], out.inputs["Surface"])
+    else:
+        shader = nt.nodes.new("ShaderNodeBsdfPrincipled")
+        nt.links.new(attr.outputs["Color"], shader.inputs["Base Color"])
+        nt.links.new(shader.outputs["BSDF"], out.inputs["Surface"])
+    shader.location = (-120, 0)
     return mat
 
 

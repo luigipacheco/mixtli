@@ -317,6 +317,10 @@ class MIXTLI_OT_gis_map(bpy.types.Operator):
             lines.append("%s - %s, %s" % (obj.name, FRAME_LABEL[info["frame"]], info["georef"]))
             rep = []
             attrs, legs = gis_map.map_features(xyz, feats, fields, s.line_max, rep)
+            gis_map.carry_added(legs, view.legends(obj))   # values typed in by hand
+            kept = view.edits(obj)             # corrections made by hand, by feature id
+            if kept:
+                gis_map.apply_edits(attrs, legs, kept, rep)
             lines += rep
             d = obj.data
             for name in [a.name for a in d.attributes if a.name.startswith("gis_")]:
@@ -328,7 +332,8 @@ class MIXTLI_OT_gis_map(bpy.types.Operator):
             obj["mixtli_gis"] = json.dumps({
                 "legends": legs,
                 "meta": dict(info, source=s.loaded, fields=fields,
-                             mapped=time.strftime("%Y-%m-%d %H:%M"))})
+                             mapped=time.strftime("%Y-%m-%d %H:%M")),
+                "edits": kept})
             lines.append("  wrote %s in %.2fs" % (", ".join(attrs) or "nothing",
                                                   time.time() - t0))
             first = next((n for n, m in legs.items() if m.get("kind") == "category"), None)
