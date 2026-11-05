@@ -8,7 +8,8 @@ Mixtli brings point clouds into Blender, gives you tools to interrogate them,
 and renders the answer.
 
 - **Generate** - from a textured mesh, however many material slots it carries,
-  or from a cloud you already have.
+  or from a cloud you already have. Over the surface, or filling the solid
+  inside it.
 - **Analyse** - select by distance, section, volume, height, or by an attribute
   the cloud came with.
 - **Visualise** - results come out as colour, ready to light and render.
@@ -38,6 +39,10 @@ For a voxel grid: set **Points From** to *Regular Grid*, give **Voxel Size** a
 value in metres, then raise **Scatter Points** until the dialog reads 25-50
 points per cell. Set **Cell Position** to *Cell Centre* for a true lattice.
 
+For a solid: set **Points From** to *Solid Fill*. The inside of the mesh fills
+with the same lattice, and **Add Volume Node Group** makes the result a volume
+in geometry nodes.
+
 ## Use
 
 Select a mesh, open the **Mixtli** tab in the 3D view sidebar (`N`), hit the
@@ -56,6 +61,7 @@ slider.
 | Scatter on Faces | Mesh + geometry nodes | Live density you can scrub |
 | Mesh Vertices | Mesh + geometry nodes | One point per vertex |
 | Regular Grid | Real PointCloud object | Voxel grids, cleanup, PLY export |
+| Solid Fill | Real PointCloud object | The inside too: solids, sections, volumes |
 
 The dialog shows a live estimate of point count, spacing and radius as you
 change settings, so you can tell before committing whether the numbers make
@@ -73,7 +79,9 @@ sense for your object.
 - **Export PLY** - under Advanced. Binary, with colour.
 
 Output is a real `PointCloud` datablock with `position` / `radius` / `Col`, so
-you can stack geometry nodes on it afterwards.
+you can stack geometry nodes on it afterwards. On Blender 4.x, which has no
+way to size a point cloud from Python, Mixtli builds the points as a mesh and
+converts it, so the result is the same.
 
 **Add Display Node Group** (Advanced, on by default) attaches a small shared
 modifier with a **Radius Scale** slider, so point size stays adjustable
@@ -85,6 +93,61 @@ across objects of any scale.
 
 *Cell Centre grid, post-processed in geometry nodes: distance to the sphere
 drives a Map Range into a colour mix.*
+
+### Solid Fill
+
+The other modes put points on the surface. *Solid Fill* puts them inside as
+well: a regular lattice at **Voxel Size** through the whole body of the mesh,
+with the surface cells on top, so the cloud is a solid you can section, count
+cells in, or turn into a volume. Every point carries a `depth` attribute -
+its distance to the surface, 0 on the surface itself - so the shell, the core
+and anything in between is a *Compare* on `depth` away.
+
+- **Fill Rule** - *Closed Mesh* casts rays through the lattice along all three
+  axes and calls a cell inside when two of them agree, so a mesh that is
+  closed, or nearly so, fills correctly; small holes and the odd missing face
+  are outvoted. *Below Surface* fills everything under the topmost surface
+  down to the mesh's lowest point, which is what terrain, photogrammetry
+  sheets and 3D Tiles need - they have no underside to be inside of.
+- **Fill Depth** - fill only this far below the surface, for a thick shell
+  rather than a full solid. 0 fills everything.
+- **Include Surface** - off keeps just the interior, for combining with a
+  surface cloud you already have.
+- **Interior Colour** - *Nearest Surface* gives each interior point the colour
+  of the surface cell nearest to it, so a cut through a building shows the
+  facade colour on the way in. *Flat* paints the inside one colour.
+- **Surface Cells** - *Centroid* lets the surface cells follow the surface,
+  *Cell Centre* keeps everything on the lattice.
+- **Scatter Points** feeds the surface cells, as in Regular Grid; the inside
+  comes from the triangles directly, so it has no holes to worry about.
+- **Voxel Size** 0 picks a fiftieth of the longest side. The dialog shows the
+  lattice size before you commit; it refuses lattices over 100 million cells.
+
+The inside test is pure numpy and quick - a million-cell lattice takes well
+under a second - and it is exact for watertight meshes.
+
+### Use as a volume
+
+**Add Volume Node Group** (in the dialog for Regular Grid and Solid Fill, and
+for incoming clouds) or **Add Volume Modifier** (in the panel, for any selected
+cloud or mesh) adds a shared *Mixtli Volume* geometry-nodes modifier that
+turns the points into a fog volume with *Points to Volume*. From there any
+volume node applies: *Volume to Mesh* for a surface, *Distribute Points in
+Volume* for a new cloud, *Sample Volume* to read density, or a Principled
+Volume material to render it as fog.
+
+| Input | Does |
+|---|---|
+| **Voxel Scale** | voxel size as a multiple of the mean point radius |
+| **Radius Scale** | each point's sphere as a multiple of its radius; 1.5 fuses lattice neighbours into a solid |
+| **Density** | the value written into the `density` grid |
+| **Mesh Output** | *Volume to Mesh* instead, wrapped in the point material: a watertight surface around the cloud |
+
+Everything is relative to the stored per-point radius, like the Display
+group, so one modifier is right for clouds of any scale, and the Display
+group's **Radius Scale** feeds through. The volume gets the `Mixtli_Volume`
+material - a Principled Volume, built once and then left as you edit it.
+Drop the group on a mesh and its vertices become the points.
 
 ## Analyse
 

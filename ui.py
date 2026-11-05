@@ -5,9 +5,10 @@ import time
 
 import bpy
 from bpy.props import (BoolProperty, EnumProperty, FloatProperty,
-                       IntProperty, StringProperty)
+                       FloatVectorProperty, IntProperty, StringProperty)
 
-from .build import process
+from .build import apply_volume_group, process
+from .pointops import MAX_LATTICE_CELLS
 from .colour import input_kind, surface_area
 
 BIG_POINT_WARNING = 25_000_000
@@ -44,7 +45,12 @@ class MIXTLI_OT_pointcloud(bpy.types.Operator):
                 "One point per existing vertex"),
                ('GRID', "Regular Grid (Python)",
                 "Scatter, filter and voxel-grid in numpy, then output a real "
-                "PointCloud object. Non-destructive; add geometry nodes after")],
+                "PointCloud object. Non-destructive; add geometry nodes after"),
+               ('VOLUME', "Solid Fill (Python)",
+                "Fill the inside of the mesh with a regular lattice of points, "
+                "surface included, each carrying its depth below the surface. "
+                "A real PointCloud object; add the volume node group to use it "
+                "as a volume in geometry nodes")],
         default='DISTRIBUTE')
     density_mode: EnumProperty(
         name="Density",
@@ -88,6 +94,40 @@ class MIXTLI_OT_pointcloud(bpy.types.Operator):
         name="Add Display Node Group", default=True,
         description="Add a shared geometry-nodes modifier with a Radius Scale "
                     "slider, so point size stays adjustable after the fact")
+    volume_group: BoolProperty(
+        name="Add Volume Node Group", default=False,
+        description="Add a Mixtli Volume geometry-nodes modifier that turns the "
+                    "points into a fog volume with Points to Volume - Voxel "
+                    "Scale, Radius Scale and Density sliders, and a Mesh Output "
+                    "toggle for the surface wrapping it instead")
+
+    # --- solid fill
+    fill_rule: EnumProperty(
+        name="Fill Rule",
+        items=[('CLOSED', "Closed Mesh",
+                "Ray parity along three axes; a cell is inside when two agree. "
+                "For meshes that are closed, or nearly so"),
+               ('BELOW', "Below Surface",
+                "Everything under the topmost surface, down to the lowest "
+                "point. For terrain and scans that are open underneath")],
+        default='CLOSED')
+    fill_depth: FloatProperty(
+        name="Fill Depth", default=0.0, min=0.0, soft_max=100.0, subtype='DISTANCE',
+        description="Fill only this far below the surface, leaving a thick "
+                    "shell. 0 fills the whole interior")
+    include_surface: BoolProperty(
+        name="Include Surface", default=True,
+        description="Keep the surface cells as well as the interior ones")
+    interior_colour: EnumProperty(
+        name="Interior Colour",
+        items=[('NEAREST', "Nearest Surface",
+                "Each interior point takes the colour of the surface cell "
+                "nearest to it"),
+               ('FLAT', "Flat", "One colour for every interior point")],
+        default='NEAREST')
+    flat_colour: FloatVectorProperty(
+        name="Colour", subtype='COLOR', size=4, min=0.0, max=1.0,
+        default=(0.8, 0.8, 0.8, 1.0))
 
     # --- shared
     radius_mode: EnumProperty(
@@ -148,14 +188,29 @@ class MIXTLI_OT_pointcloud(bpy.types.Operator):
     stat_objects: IntProperty(options={'HIDDEN', 'SKIP_SAVE'})
     stat_verts: IntProperty(options={'HIDDEN', 'SKIP_SAVE'})
     stat_is_points: BoolProperty(options={'HIDDEN', 'SKIP_SAVE'})
+    stat_volume: FloatProperty(options={'HIDDEN', 'SKIP_SAVE'})
+    stat_longest: FloatProperty(options={'HIDDEN', 'SKIP_SAVE'})
 
     @classmethod
     def poll(cls, context):
         return any(input_kind(o) for o in context.selected_objects)
 
+    def fill_voxel(self):
+        """Voxel Size as the solid fill will use it: 0 means a fiftieth of
+        the longest side."""
+        if self.voxel_size > 0.0:
+            return self.voxel_size
+        return self.stat_longest / 50.0 if self.stat_longest > 0.0 else 1.0
+
     def estimate(self):
         """(points, spacing, radius) for the current settings."""
         area = self.stat_area
+        if self.point_source == 'VOLUME':
+            voxel = self.fill_voxel()
+            cells = self.stat_volume / voxel ** 3 if voxel > 0.0 else 0.0
+            radius = self.point_radius if self.radius_mode == 'MANUAL' \
+                else voxel * self.radius_factor
+            return cells, voxel, radius
         if self.point_source == 'GRID':
             pts = self.py_points
             if self.voxel_size > 0.0:
@@ -196,6 +251,7 @@ class MIXTLI_OT_pointcloud(bpy.types.Operator):
             layout.prop(self, "point_radius" if self.radius_mode == 'MANUAL'
                         else "radius_factor")
             layout.prop(self, "display_group")
+            layout.prop(self, "volume_group")
 
             box = layout.box()
             col = box.column(align=True)
@@ -239,10 +295,23 @@ class MIXTLI_OT_pointcloud(bpy.types.Operator):
                 layout.prop(self, "grid_mode")
                 layout.prop(self, "world_anchored")
                 layout.prop(self, "min_cell_points")
+        elif self.point_source == 'VOLUME':
+            layout.prop(self, "py_points")
+            layout.prop(self, "voxel_size")
+            layout.prop(self, "fill_rule")
+            layout.prop(self, "fill_depth")
+            layout.prop(self, "include_surface")
+            layout.prop(self, "interior_colour")
+            if self.interior_colour == 'FLAT':
+                layout.prop(self, "flat_colour")
+            layout.prop(self, "grid_mode", text="Surface Cells")
+            layout.prop(self, "world_anchored")
         layout.prop(self, "radius_mode")
         layout.prop(self, "point_radius" if self.radius_mode == 'MANUAL'
                     else "radius_factor")
-        if self.point_source != 'GRID':
+        if self.point_source in ('GRID', 'VOLUME'):
+            layout.prop(self, "volume_group")
+        else:
             layout.prop(self, "duplicate")
 
         pts, spacing, radius = self.estimate()
@@ -252,7 +321,19 @@ class MIXTLI_OT_pointcloud(bpy.types.Operator):
         col.label(text="%d object(s)  -  %s surface"
                        % (self.stat_objects, fmt_area(self.stat_area)),
                   icon='OUTLINER_OB_MESH')
-        if self.point_source == 'GRID' and self.voxel_size > 0.0:
+        if self.point_source == 'VOLUME':
+            voxel = spacing
+            shell = self.stat_area / voxel ** 2 if voxel > 0.0 else 0.0
+            per_cell = self.py_points / max(shell, 1.0)
+            col.label(text="voxel %.3g m  ->  lattice of up to %s cells  -  r %.3g m"
+                           % (voxel, fmt_count(pts), radius))
+            col.label(text="surface ~%s cells  -  ~%.1f scatter points per cell"
+                           % (fmt_count(shell), per_cell))
+            if per_cell < 10:
+                col.label(text="Low coverage - raise Scatter Points", icon='ERROR')
+            if pts > MAX_LATTICE_CELLS:
+                col.label(text="Lattice too large - raise Voxel Size", icon='CANCEL')
+        elif self.point_source == 'GRID' and self.voxel_size > 0.0:
             per_cell = self.py_points / max(pts, 1.0)
             col.label(text="%s scattered  ->  ~%s cells  -  r %.3g m"
                            % (fmt_count(self.py_points), fmt_count(pts), radius))
@@ -283,7 +364,7 @@ class MIXTLI_OT_pointcloud(bpy.types.Operator):
                 box.prop(self, "seed")
             box.prop(self, "bilinear")
             box.prop(self, "suffix")
-            if self.point_source == 'GRID':
+            if self.point_source in ('GRID', 'VOLUME'):
                 box.separator()
                 box.prop(self, "export_ply")
                 if self.export_ply:
@@ -307,6 +388,11 @@ class MIXTLI_OT_pointcloud(bpy.types.Operator):
             mesh = [o for o in targets if input_kind(o) == 'MESH']
             self.stat_verts = sum(len(o.data.vertices) for o in mesh)
             self.stat_area = sum(surface_area(o) for o in mesh)
+            # the lattice is in local units, like Voxel Size; .dimensions
+            # carries the object scale, so this is only an estimate
+            self.stat_volume = sum(o.dimensions[0] * o.dimensions[1] * o.dimensions[2]
+                                   for o in mesh)
+            self.stat_longest = max([max(o.dimensions) for o in mesh] or [0.0])
         return context.window_manager.invoke_props_dialog(self, width=380)
 
     def execute(self, context):
@@ -338,6 +424,39 @@ class MIXTLI_OT_pointcloud(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class MIXTLI_OT_volume(bpy.types.Operator):
+    """Add a Mixtli Volume modifier to the selected clouds: Points to Volume \
+with Voxel Scale, Radius Scale and Density sliders, and a Mesh Output toggle, \
+so the points can be used as a volume in geometry nodes"""
+    bl_idname = "object.mixtli_volume"
+    bl_label = "Add Volume Modifier"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return any(input_kind(o) for o in context.selected_objects)
+
+    def execute(self, context):
+        n = 0
+        for o in context.selected_objects:
+            if not input_kind(o):
+                continue
+            if any(m.type == 'NODES' and m.name.startswith("Mixtli Volume")
+                   for m in o.modifiers):
+                continue                      # already has one; leave it as set
+            mat = o.active_material
+            if mat is None and len(o.data.materials):
+                mat = o.data.materials[0]
+            apply_volume_group(o, mat)
+            n += 1
+        if not n:
+            self.report({'WARNING'}, "Nothing to add: select a cloud or mesh without a "
+                                     "Mixtli Volume modifier")
+            return {'CANCELLED'}
+        self.report({'INFO'}, "Mixtli Volume modifier added to %d object(s)" % n)
+        return {'FINISHED'}
+
+
 class MIXTLI_PT_panel(bpy.types.Panel):
     bl_label = "Mixtli"
     bl_space_type = 'VIEW_3D'
@@ -346,17 +465,25 @@ class MIXTLI_PT_panel(bpy.types.Panel):
 
     def draw(self, context):
         layout = self.layout
-        sel = [o for o in context.selected_objects if o.type == 'MESH']
+        sel = [o for o in context.selected_objects if input_kind(o)]
         col = layout.column()
         col.scale_y = 1.4
         col.operator("object.mixtli_pointcloud", icon='OUTLINER_OB_POINTCLOUD')
         if not sel:
-            layout.label(text="Select a mesh object", icon='INFO')
+            layout.label(text="Select a mesh or point cloud", icon='INFO')
         else:
-            layout.label(text="%d mesh object(s) selected" % len(sel))
+            meshes = sum(1 for o in sel if input_kind(o) == 'MESH')
+            clouds = len(sel) - meshes
+            parts = []
+            if meshes:
+                parts.append("%d mesh" % meshes)
+            if clouds:
+                parts.append("%d cloud" % clouds)
+            layout.label(text="%s object(s) selected" % " + ".join(parts))
+        layout.operator("object.mixtli_volume", icon='VOLUME_DATA')
 
 
-CLASSES = (MIXTLI_OT_pointcloud, MIXTLI_PT_panel)
+CLASSES = (MIXTLI_OT_pointcloud, MIXTLI_OT_volume, MIXTLI_PT_panel)
 
 
 def register():
